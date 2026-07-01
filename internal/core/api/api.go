@@ -3,7 +3,9 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -26,6 +28,7 @@ func NewRouter(d Deps, spa http.Handler) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.RequestID)
+	r.Use(requestLogger)
 
 	r.Get("/health", s.handleHealth)
 
@@ -41,9 +44,30 @@ func NewRouter(d Deps, spa http.Handler) http.Handler {
 		})
 	})
 
-	// SPA fallback for everything else.
-	r.NotFound(spa.ServeHTTP)
+	// SPA fallback for everything else; unknown /api/* paths get a JSON 404.
+	r.NotFound(func(w http.ResponseWriter, req *http.Request) {
+		if strings.HasPrefix(req.URL.Path, "/api/") {
+			WriteError(w, http.StatusNotFound, "not_found", "no such endpoint")
+			return
+		}
+		spa.ServeHTTP(w, req)
+	})
 	return r
+}
+
+func requestLogger(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
+		next.ServeHTTP(ww, r)
+		slog.Default().Info("http request",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"status", ww.Status(),
+			"bytes", ww.BytesWritten(),
+			"duration_ms", time.Since(start).Milliseconds(),
+		)
+	})
 }
 
 type loginRequest struct {
@@ -63,7 +87,8 @@ func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		WriteError(w, http.StatusInternalServerError, "internal", err.Error())
+		slog.Default().Error("login failed", "err", err)
+		WriteError(w, http.StatusInternalServerError, "internal", "internal error")
 		return
 	}
 	http.SetCookie(w, &http.Cookie{

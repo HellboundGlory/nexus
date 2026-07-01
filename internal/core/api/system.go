@@ -1,6 +1,7 @@
 package api
 
 import (
+	"log/slog"
 	"net/http"
 )
 
@@ -14,7 +15,8 @@ type statusResponse struct {
 func (s *server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	tasks, err := s.deps.Store.ListTasks(r.Context(), 100)
 	if err != nil {
-		WriteError(w, http.StatusInternalServerError, "internal", err.Error())
+		slog.Default().Error("status failed", "err", err)
+		WriteError(w, http.StatusInternalServerError, "internal", "internal error")
 		return
 	}
 	WriteJSON(w, http.StatusOK, statusResponse{

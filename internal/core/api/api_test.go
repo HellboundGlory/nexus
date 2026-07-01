@@ -73,8 +73,39 @@ func TestLoginSetsCookie(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("login: want 200 got %d (%s)", rec.Code, rec.Body.String())
 	}
-	if len(rec.Result().Cookies()) == 0 {
+	cookies := rec.Result().Cookies()
+	if len(cookies) == 0 {
 		t.Fatal("expected session cookie")
+	}
+	var sessionCookie *http.Cookie
+	for _, c := range cookies {
+		if c.Name == auth.CookieName {
+			sessionCookie = c
+			break
+		}
+	}
+	if sessionCookie == nil {
+		t.Fatalf("expected cookie named %q, got %v", auth.CookieName, cookies)
+	}
+	if !sessionCookie.HttpOnly {
+		t.Fatalf("expected session cookie to be HttpOnly, got %+v", sessionCookie)
+	}
+}
+
+func TestUnknownAPIRouteReturns404JSON(t *testing.T) {
+	r, _ := newRouter(t)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/does-not-exist", nil)
+	req.Header.Set(auth.APIKeyHeader, "k")
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown api route: want 404 got %d (%s)", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "not_found") {
+		t.Fatalf("expected JSON 404 envelope with \"not_found\", got %q", rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "SPA") {
+		t.Fatalf("unknown api route should not fall back to SPA, got %q", rec.Body.String())
 	}
 }
 
