@@ -27,13 +27,13 @@ type Session struct {
 }
 
 type Task struct {
-	ID        string
-	Name      string
-	Status    string
-	Progress  int
-	Message   string
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	Status    string    `json:"status"`
+	Progress  int       `json:"progress"`
+	Message   string    `json:"message"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // --- settings ---

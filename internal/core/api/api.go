@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/hellboundg/nexus/internal/core/auth"
+	"github.com/hellboundg/nexus/internal/core/events"
 	"github.com/hellboundg/nexus/internal/core/store"
 )
 
@@ -19,9 +20,13 @@ type Deps struct {
 	Auth    *auth.Service
 	Store   *store.Store
 	Version string
+	Bus     *events.Bus
 }
 
-type server struct{ deps Deps }
+type server struct {
+	deps Deps
+	hub  *hub
+}
 
 func NewRouter(d Deps, spa http.Handler) http.Handler {
 	s := &server{deps: d}
@@ -39,7 +44,6 @@ func NewRouter(d Deps, spa http.Handler) http.Handler {
 		r.Group(func(r chi.Router) {
 			r.Use(d.Auth.Middleware)
 			r.Get("/system/status", s.handleStatus)
-			// WebSocket route is registered in ws.go via RegisterWebSocket (Task 10).
 			s.registerWebSocket(r)
 		})
 	})
@@ -109,6 +113,3 @@ func (s *server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{Name: auth.CookieName, Value: "", Path: "/", MaxAge: -1})
 	WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
-
-// Temporary stub for Task 10; replaced with real implementation in ws.go
-func (s *server) registerWebSocket(r chi.Router) {}
