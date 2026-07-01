@@ -20,6 +20,20 @@ func (c countCmd) Run(context.Context, command.Reporter) error {
 	return nil
 }
 
+func TestSchedulerDoubleStopNoPanic(t *testing.T) {
+	db, _ := database.Open(t.TempDir() + "/t.db")
+	defer db.Close()
+	database.Migrate(db)
+	m := command.NewManager(store.New(db), events.New(), 2)
+	m.Start()
+	defer m.Stop()
+
+	sch := New(m)
+	sch.Start()
+	sch.Stop()
+	sch.Stop()
+}
+
 func TestEveryFiresRepeatedly(t *testing.T) {
 	db, _ := database.Open(t.TempDir() + "/t.db")
 	defer db.Close()

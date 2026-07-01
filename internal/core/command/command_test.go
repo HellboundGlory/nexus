@@ -34,6 +34,24 @@ func newMgr(t *testing.T) (*Manager, *store.Store) {
 	return m, s
 }
 
+func TestEnqueueAfterStopReturnsError(t *testing.T) {
+	m, _ := newMgr(t)
+	m.Start()
+	m.Stop()
+
+	id, err := m.Enqueue(fakeCmd{done: make(chan struct{})})
+	if err != ErrManagerStopped {
+		t.Fatalf("expected ErrManagerStopped, got id=%q err=%v", id, err)
+	}
+}
+
+func TestDoubleStopNoPanic(t *testing.T) {
+	m, _ := newMgr(t)
+	m.Start()
+	m.Stop()
+	m.Stop()
+}
+
 func TestEnqueueRunsAndCompletes(t *testing.T) {
 	m, s := newMgr(t)
 	m.Start()

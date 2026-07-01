@@ -4,12 +4,16 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"log/slog"
 	"sync"
 
 	"github.com/hellboundg/nexus/internal/core/events"
 	"github.com/hellboundg/nexus/internal/core/store"
 )
+
+// ErrManagerStopped is returned by Enqueue once the Manager has been stopped.
+var ErrManagerStopped = errors.New("command: manager stopped")
 
 type Reporter interface{ Progress(pct int, msg string) }
 
@@ -29,12 +33,14 @@ type job struct {
 }
 
 type Manager struct {
-	store   *store.Store
-	bus     *events.Bus
-	workers int
-	queue   chan job
-	wg      sync.WaitGroup
-	log     *slog.Logger
+	store    *store.Store
+	bus      *events.Bus
+	workers  int
+	queue    chan job
+	wg       sync.WaitGroup
+	log      *slog.Logger
+	done     chan struct{}
+	stopOnce sync.Once
 }
 
 func NewManager(s *store.Store, bus *events.Bus, workers int) *Manager {
@@ -47,6 +53,7 @@ func NewManager(s *store.Store, bus *events.Bus, workers int) *Manager {
 		workers: workers,
 		queue:   make(chan job, 256),
 		log:     slog.Default(),
+		done:    make(chan struct{}),
 	}
 }
 
@@ -59,13 +66,20 @@ func (m *Manager) Start() {
 	}
 }
 
-// Stop closes the queue and waits for in-flight jobs to drain.
+// Stop signals all workers to exit and waits for in-flight jobs to drain.
+// It is safe to call multiple times.
 func (m *Manager) Stop() {
-	close(m.queue)
+	m.stopOnce.Do(func() { close(m.done) })
 	m.wg.Wait()
 }
 
 func (m *Manager) Enqueue(c Command) (string, error) {
+	select {
+	case <-m.done:
+		return "", ErrManagerStopped
+	default:
+	}
+
 	id, err := newID()
 	if err != nil {
 		return "", err
@@ -74,15 +88,24 @@ func (m *Manager) Enqueue(c Command) (string, error) {
 	if err := m.store.UpsertTask(context.Background(), t); err != nil {
 		return "", err
 	}
-	m.emit(t)
-	m.queue <- job{id: id, cmd: c}
-	return id, nil
+	select {
+	case m.queue <- job{id: id, cmd: c}:
+		m.emit(t)
+		return id, nil
+	case <-m.done:
+		return "", ErrManagerStopped
+	}
 }
 
 func (m *Manager) worker() {
 	defer m.wg.Done()
-	for j := range m.queue {
-		m.run(j)
+	for {
+		select {
+		case <-m.done:
+			return
+		case j := <-m.queue:
+			m.run(j)
+		}
 	}
 }
 

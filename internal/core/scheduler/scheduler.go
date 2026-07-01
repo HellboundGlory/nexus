@@ -13,10 +13,11 @@ type entry struct {
 }
 
 type Scheduler struct {
-	mgr     *command.Manager
-	entries []entry
-	stop    chan struct{}
-	wg      sync.WaitGroup
+	mgr      *command.Manager
+	entries  []entry
+	stop     chan struct{}
+	wg       sync.WaitGroup
+	stopOnce sync.Once
 }
 
 func New(m *command.Manager) *Scheduler {
@@ -48,7 +49,8 @@ func (s *Scheduler) Start() {
 	}
 }
 
+// Stop is safe to call multiple times.
 func (s *Scheduler) Stop() {
-	close(s.stop)
+	s.stopOnce.Do(func() { close(s.stop) })
 	s.wg.Wait()
 }
