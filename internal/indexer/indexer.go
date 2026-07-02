@@ -57,8 +57,10 @@ func (s *Service) Reload(ctx context.Context) error {
 		if ix.Caps != "" {
 			_ = json.Unmarshal([]byte(ix.Caps), &caps)
 		} else {
-			// Default: support generic and TV search for new indexers without known caps
-			caps = Capabilities{Search: true, TVSearch: true}
+			// No caps discovered yet: default to permissive (all search types) so a
+			// freshly-added indexer is usable immediately; the health check refines
+			// this once real caps are fetched.
+			caps = Capabilities{Search: true, TVSearch: true, MovieSearch: true}
 		}
 		proto := provider.ProtocolUsenet
 		if ix.Implementation == "torznab" {
