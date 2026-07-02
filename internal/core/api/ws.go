@@ -92,6 +92,15 @@ func (s *server) registerWebSocket(r chi.Router) {
 				}
 			})
 		}
+		for _, name := range s.deps.WSForward {
+			name := name
+			if s.deps.Bus == nil {
+				break
+			}
+			s.deps.Bus.Subscribe(name, func(_ context.Context, e events.Event) {
+				s.hub.broadcast(wsMessage{Type: e.Name(), Data: e})
+			})
+		}
 	}
 	r.Get("/ws", func(w http.ResponseWriter, req *http.Request) {
 		conn, err := upgrader.Upgrade(w, req, nil)
