@@ -78,11 +78,11 @@ func run(ctx context.Context) error {
 	if err := idxSvc.Reload(ctx); err != nil {
 		return err
 	}
-	idxAPI := indexer.NewAPI(st, idxSvc, nil)
+	idxAPI := indexer.NewAPI(st, idxSvc, &http.Client{Timeout: 30 * time.Second})
 
 	sch := scheduler.New(mgr)
 	sch.Every(15*time.Minute, func() command.Command {
-		return indexer.NewHealthCheck(st, bus, nil)
+		return indexer.NewHealthCheck(st, bus, &http.Client{Timeout: 30 * time.Second})
 	})
 	sch.Start()
 
