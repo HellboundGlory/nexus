@@ -26,6 +26,7 @@ import (
 	"github.com/hellboundg/nexus/internal/core/scheduler"
 	"github.com/hellboundg/nexus/internal/core/store"
 	"github.com/hellboundg/nexus/internal/core/version"
+	"github.com/hellboundg/nexus/internal/indexer"
 	"github.com/hellboundg/nexus/web"
 )
 
@@ -72,13 +73,24 @@ func run(ctx context.Context) error {
 	bus := events.New().WithLogger(log)
 	mgr := command.NewManager(st, bus, 4).WithLogger(log)
 	mgr.Start()
+
+	idxSvc := indexer.NewService(st)
+	if err := idxSvc.Reload(ctx); err != nil {
+		return err
+	}
+	idxAPI := indexer.NewAPI(st, idxSvc, nil)
+
 	sch := scheduler.New(mgr)
+	sch.Every(15*time.Minute, func() command.Command {
+		return indexer.NewHealthCheck(st, bus, nil)
+	})
 	sch.Start()
 
 	authSvc := auth.NewService(st, cfg.APIKey)
 	router := api.NewRouter(api.Deps{
 		Auth: authSvc, Store: st, Version: version.Version(), Bus: bus,
-	}, web.Handler())
+		WSForward: []string{"indexer.status"},
+	}, web.Handler(), idxAPI.Mount)
 
 	srv := &http.Server{Addr: cfg.Addr(), Handler: router}
 	go func() {
