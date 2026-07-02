@@ -9,7 +9,11 @@
 
 # Node / frontend
 web/node_modules/
-web/dist/
+# Generated SPA build output is ignored, but keep the Foundation placeholder
+# so the //go:embed dist target exists and the binary builds from a clean
+# checkout. The real React build replaces this in a later sub-project.
+web/dist/*
+!web/dist/index.html
 
 # Editor / OS
 .DS_Store
