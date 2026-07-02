@@ -1,3 +1,4 @@
-// Package indexer implements Prowlarr-equivalent indexer search.
-// Foundation ships only the package; behavior lands in sub-project 2.
+// Package indexer implements Prowlarr-equivalent indexer management and search
+// over the Newznab and Torznab protocols. It fills the provider.Indexer contract
+// declared in core/provider and imports only internal/core/*.
 package indexer
