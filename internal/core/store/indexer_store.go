@@ -13,7 +13,7 @@ type Indexer struct {
 	Name           string     `json:"name"`
 	Implementation string     `json:"implementation"`
 	BaseURL        string     `json:"baseUrl"`
-	APIKey         string     `json:"apiKey"`
+	APIKey         string     `json:"-"`
 	Enabled        bool       `json:"enabled"`
 	Priority       int        `json:"priority"`
 	Categories     []int      `json:"categories"`

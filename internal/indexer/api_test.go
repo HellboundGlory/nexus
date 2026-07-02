@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -37,14 +38,19 @@ func TestIndexerAPICreateAndSearch(t *testing.T) {
 	a := NewAPI(st, svc, idx.Client())
 	router := mountedRouter(t, svc, a)
 
-	// Create indexer.
+	// Create indexer with a secret API key.
+	secretKey := "SECRET-KEY-123"
 	payload, _ := json.Marshal(map[string]any{
-		"name": "t", "implementation": "torznab", "baseUrl": idx.URL, "enabled": true, "priority": 25,
+		"name": "t", "implementation": "torznab", "baseUrl": idx.URL, "apiKey": secretKey, "enabled": true, "priority": 25,
 	})
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/v1/indexer", bytes.NewReader(payload)))
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("create: %d body=%s", rec.Code, rec.Body.String())
+	}
+	// Assert API key is not leaked in create response.
+	if strings.Contains(rec.Body.String(), secretKey) {
+		t.Fatalf("API key leaked in create response: %s", rec.Body.String())
 	}
 
 	// List.
@@ -52,6 +58,10 @@ func TestIndexerAPICreateAndSearch(t *testing.T) {
 	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/indexer", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("list: %d", rec.Code)
+	}
+	// Assert API key is not leaked in list response.
+	if strings.Contains(rec.Body.String(), secretKey) {
+		t.Fatalf("API key leaked in list response: %s", rec.Body.String())
 	}
 
 	// Search.
