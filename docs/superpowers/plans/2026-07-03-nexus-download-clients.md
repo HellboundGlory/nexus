@@ -1161,15 +1161,17 @@ func TestQBittorrentAddMagnetTestRemove(t *testing.T) {
 	}
 	// Magnet grab: Content is nil, URL carries the magnet. qBit derives the id from
 	// the btih hash in the magnet URL.
+	// A real BitTorrent v1 infohash is SHA-1 = 40 hex chars; upper-case here to
+	// exercise the (?i) regex + ToLower normalization in Add.
 	id, err := c.Add(ctx, provider.DownloadRequest{
-		URL:      "magnet:?xt=urn:btih:AAA111&dn=x",
+		URL:      "magnet:?xt=urn:btih:0123456789ABCDEF0123456789ABCDEF01234567&dn=x",
 		Protocol: provider.ProtocolTorrent,
 	})
 	if err != nil {
 		t.Fatalf("add: %v", err)
 	}
-	if id != "aaa111" {
-		t.Fatalf("add id = %q want aaa111 (lowercased btih)", id)
+	if id != "0123456789abcdef0123456789abcdef01234567" {
+		t.Fatalf("add id = %q want lowercased 40-hex btih", id)
 	}
 	if err := c.Remove(ctx, "aaa111", true); err != nil {
 		t.Fatalf("remove: %v", err)

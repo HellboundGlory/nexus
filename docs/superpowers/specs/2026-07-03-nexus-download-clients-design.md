@@ -305,6 +305,11 @@ into the response rather than propagated as a 500.
 - **`category` is a per-client config field** (with an optional per-grab override) so
   downloads land in the right folder for the future import pipeline, even though no
   import logic exists yet.
-- **Extending `provider.DownloadClient` changes its method set**, so the Foundation
-  `provider_test.go` fake is updated — the one place a Foundation test file changes.
+- **Extending `provider.DownloadClient` changes its method set.** No existing fake
+  breaks (Foundation's `provider_test.go` only fakes `Indexer`); the plan *adds* a
+  fake download client to prove the extended contract.
+- **qBittorrent category pre-existence (live-use caveat).** `/torrents/add` with a
+  non-existent `category` does not error but may not file the download as expected;
+  real deployments call `createCategory` first. Out of scope here (tests use a fake
+  server); noted as a follow-up for when running against a live qBittorrent.
 - Module path `github.com/hellboundg/nexus` throughout.
