@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss xmlns:newznab="http://www.newznab.com/DTD/2010/feeds/attributes/">
+  <channel>
+    <item>
+      <title>The.Show.S02E05.1080p.WEB-DL</title>
+      <guid>https://idx.test/details/abc123</guid>
+      <comments>https://idx.test/details/abc123#comments</comments>
+      <link>https://idx.test/getnzb/abc123.nzb</link>
+      <pubDate>Mon, 15 Jun 2026 10:00:00 +0000</pubDate>
+      <enclosure url="https://idx.test/getnzb/abc123.nzb" length="1610612736" type="application/x-nzb"/>
+      <newznab:attr name="category" value="5000"/>
+      <newznab:attr name="category" value="5040"/>
+      <newznab:attr name="size" value="1610612736"/>
+    </item>
+  </channel>
+</rss>

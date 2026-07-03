@@ -17,10 +17,11 @@ import (
 )
 
 type Deps struct {
-	Auth    *auth.Service
-	Store   *store.Store
-	Version string
-	Bus     *events.Bus
+	Auth      *auth.Service
+	Store     *store.Store
+	Version   string
+	Bus       *events.Bus
+	WSForward []string
 }
 
 type server struct {
@@ -28,7 +29,7 @@ type server struct {
 	hub  *hub
 }
 
-func NewRouter(d Deps, spa http.Handler) http.Handler {
+func NewRouter(d Deps, spa http.Handler, mounts ...func(chi.Router)) http.Handler {
 	s := &server{deps: d}
 	r := chi.NewRouter()
 	r.Use(middleware.Recoverer)
@@ -45,6 +46,9 @@ func NewRouter(d Deps, spa http.Handler) http.Handler {
 			r.Use(d.Auth.Middleware)
 			r.Get("/system/status", s.handleStatus)
 			s.registerWebSocket(r)
+			for _, m := range mounts {
+				m(r)
+			}
 		})
 	})
 

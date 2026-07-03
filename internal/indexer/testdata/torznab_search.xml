@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss xmlns:torznab="http://torznab.com/schemas/2015/feed">
+  <channel>
+    <item>
+      <title>The.Show.S02E05.1080p.BluRay.x264-GROUP</title>
+      <guid>https://idx.test/t/999</guid>
+      <comments>https://idx.test/t/999</comments>
+      <link>https://idx.test/download/999.torrent</link>
+      <pubDate>Tue, 16 Jun 2026 08:30:00 +0000</pubDate>
+      <enclosure url="https://idx.test/download/999.torrent" length="2147483648" type="application/x-bittorrent"/>
+      <torznab:attr name="category" value="5040"/>
+      <torznab:attr name="seeders" value="42"/>
+      <torznab:attr name="peers" value="50"/>
+    </item>
+  </channel>
+</rss>

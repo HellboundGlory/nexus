@@ -251,3 +251,23 @@ propagated as a 500.
 - `api.NewRouter` gains a variadic `mounts` parameter — the only Foundation
   signature change; existing callers/tests are unaffected.
 - Module path `github.com/hellboundg/nexus` throughout.
+
+### 10.1 Decisions settled during implementation (2026-07-02/03)
+
+- **Caps-less indexers are searchable by default.** When an indexer's `caps`
+  cache is empty (freshly added, or caps discovery has not yet run),
+  `Service.Reload` builds its client with permissive, symmetric capabilities
+  (`Search`, `TVSearch`, `MovieSearch` all `true`) so the indexer is usable
+  immediately; the scheduled health check refines this once real caps are
+  fetched.
+- **The indexer API key is write-only in the config API.** `store.Indexer.APIKey`
+  is tagged `json:"-"`, so it is never returned by the indexer CRUD endpoints
+  (list/get/create/update); it is only ever *set* via the request payload.
+- **API-key redaction scope is the indexer config, NOT release URLs.** Newznab/
+  Torznab grab and info URLs (`Release.DownloadURL` / `Release.InfoURL`) carry
+  the indexer's `apikey` query parameter by protocol necessity — the download
+  client (sub-project 3) needs it to fetch the release. These URLs are returned
+  by `GET /api/v1/search`. This is an accepted, conscious scope: the entire
+  `/api/v1` surface is behind admin API-key auth, so this is not an external
+  leak. Hiding the key entirely would require routing grabs through a Nexus
+  proxy, which is deferred to the Download-clients sub-project.

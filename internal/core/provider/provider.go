@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 )
 
 type MediaKind string
@@ -13,18 +14,50 @@ const (
 	KindMovie MediaKind = "movie"
 )
 
-// Query is a minimal search request; extended by the indexer sub-project.
+type SearchType string
+
+const (
+	SearchGeneric SearchType = "search"
+	SearchTV      SearchType = "tvsearch"
+	SearchMovie   SearchType = "movie"
+)
+
+type Protocol string
+
+const (
+	ProtocolUsenet  Protocol = "usenet"
+	ProtocolTorrent Protocol = "torrent"
+)
+
+// Query is a search request across indexers. Typed-search fields are used when
+// Type is SearchTV or SearchMovie; they are ignored for SearchGeneric.
 type Query struct {
-	Term string
-	Kind MediaKind
+	Type       SearchType
+	Term       string
+	Categories []int
+	Season     *int
+	Episode    *int
+	IMDbID     string
+	TVDBID     int
+	TMDBID     int
+	Limit      int
+	Offset     int
+	Kind       MediaKind
 }
 
-// Release is a minimal indexer result; extended by the indexer sub-project.
+// Release is a single indexer result. Seeders/Leechers are set only for torrents.
 type Release struct {
 	Title       string
 	DownloadURL string
+	InfoURL     string
 	Size        int64
 	IndexerID   string
+	Categories  []int
+	PublishDate time.Time
+	GUID        string
+	Protocol    Protocol
+	Seeders     *int
+	Leechers    *int
 }
 
 // DownloadRequest is a minimal grab request; extended by the download sub-project.
