@@ -171,3 +171,9 @@ func (s *Service) Remove(ctx context.Context, clientID, itemID string, deleteDat
 	}
 	return fmt.Errorf("%w: client %q not found or disabled", ErrClientUnavailable, clientID)
 }
+
+// newServiceWithClients builds a Service around an explicit client set. Used by
+// tests that do not go through Reload.
+func newServiceWithClients(clients ...provider.DownloadClient) *Service {
+	return &Service{http: http.DefaultClient, clients: clients}
+}
