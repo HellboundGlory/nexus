@@ -60,10 +60,39 @@ type Release struct {
 	Leechers    *int
 }
 
-// DownloadRequest is a minimal grab request; extended by the download sub-project.
+type DownloadStatus string
+
+const (
+	StatusQueued      DownloadStatus = "queued"
+	StatusDownloading DownloadStatus = "downloading"
+	StatusCompleted   DownloadStatus = "completed"
+	StatusPaused      DownloadStatus = "paused"
+	StatusFailed      DownloadStatus = "failed"
+	StatusWarning     DownloadStatus = "warning"
+)
+
+// DownloadItem is one entry in a client's queue/history snapshot.
+type DownloadItem struct {
+	ID               string         `json:"id"`
+	Title            string         `json:"title"`
+	Status           DownloadStatus `json:"status"`
+	Progress         float64        `json:"progress"` // 0..100
+	Size             int64          `json:"size"`
+	Downloaded       int64          `json:"downloaded"`
+	DownloadClientID string         `json:"downloadClientId"`
+	Protocol         Protocol       `json:"protocol"`
+	ErrorMessage     string         `json:"errorMessage,omitempty"`
+}
+
+// DownloadRequest is a grab. Content holds pre-fetched .nzb/.torrent bytes; it is
+// nil for magnet links (URL is passed through to the client).
 type DownloadRequest struct {
-	URL   string
-	Title string
+	URL       string
+	Title     string
+	Protocol  Protocol
+	IndexerID string
+	Category  string
+	Content   []byte
 }
 
 type Indexer interface {
@@ -73,7 +102,11 @@ type Indexer interface {
 
 type DownloadClient interface {
 	ID() string
-	Add(ctx context.Context, d DownloadRequest) (string, error)
+	Protocol() Protocol
+	Add(ctx context.Context, d DownloadRequest) (string, error) // returns client item id
+	Items(ctx context.Context) ([]DownloadItem, error)
+	Remove(ctx context.Context, id string, deleteData bool) error
+	Test(ctx context.Context) error
 }
 
 type MetadataProvider interface {
