@@ -240,6 +240,11 @@ func (a *API) search(w http.ResponseWriter, r *http.Request) {
 		q.Limit = n
 	}
 	res := a.svc.Search(r.Context(), q)
+	// Note: release DownloadURL/InfoURL may embed the indexer's ?apikey= — this
+	// is required for the download client to grab the release and is an accepted
+	// scope (the whole /api/v1 surface is admin-authed). The indexer *config*
+	// API key stays write-only (store.Indexer.APIKey is json:"-"). See design
+	// spec §10.1.
 	if res.Releases == nil {
 		res.Releases = []provider.Release{}
 	}
