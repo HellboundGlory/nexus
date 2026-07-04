@@ -111,3 +111,77 @@ func TestAddMovie(t *testing.T) {
 		t.Fatalf("unexpected: %+v", m)
 	}
 }
+
+func TestRefreshReconciles(t *testing.T) {
+	fp := &fakeProvider{series: sampleSeries()}
+	svc, st := newTestService(t, fp)
+	ctx := context.Background()
+
+	se, err := svc.AddSeries(ctx, AddSeriesRequest{TMDBID: 100, MonitorOption: MonitorNone})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// User monitors episode 1 manually.
+	eps, _ := st.ListEpisodes(ctx, se.ID)
+	var ep1 int64
+	for _, e := range eps {
+		if e.EpisodeNumber == 1 {
+			ep1 = e.ID
+		}
+	}
+	if err := svc.SetEpisodeMonitored(ctx, se.ID, ep1, true); err != nil {
+		t.Fatal(err)
+	}
+
+	// Upstream now: episode 1 title changed + a new episode 3 appears.
+	updated := sampleSeries()
+	updated.Title = "Show (Renamed)"
+	updated.Seasons[0].Episodes[0].Title = "Aired (v2)"
+	updated.Seasons[0].Episodes = append(updated.Seasons[0].Episodes, provider.EpisodeMetadata{
+		SeasonNumber: 1, EpisodeNumber: 3, Title: "New", AirDate: "2020-02-01",
+	})
+	fp.series = updated
+
+	if err := svc.RefreshSeries(ctx, se.ID); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := st.GetSeries(ctx, se.ID)
+	if got.Title != "Show (Renamed)" {
+		t.Fatalf("title not refreshed: %q", got.Title)
+	}
+	eps, _ = st.ListEpisodes(ctx, se.ID)
+	if len(eps) != 3 {
+		t.Fatalf("want 3 episodes after refresh, got %d", len(eps))
+	}
+	for _, e := range eps {
+		if e.EpisodeNumber == 1 {
+			if e.Title != "Aired (v2)" {
+				t.Fatalf("ep1 title not updated: %q", e.Title)
+			}
+			if !e.Monitored {
+				t.Fatal("refresh must PRESERVE user's monitored=true on ep1")
+			}
+		}
+	}
+}
+
+func TestSetSeriesMonitoredCascades(t *testing.T) {
+	fp := &fakeProvider{series: sampleSeries()}
+	svc, st := newTestService(t, fp)
+	ctx := context.Background()
+	se, _ := svc.AddSeries(ctx, AddSeriesRequest{TMDBID: 100, MonitorOption: MonitorAll})
+
+	if err := svc.SetSeriesMonitored(ctx, se.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := st.GetSeries(ctx, se.ID)
+	if got.Monitored {
+		t.Fatal("series still monitored")
+	}
+	eps, _ := st.ListEpisodes(ctx, se.ID)
+	for _, e := range eps {
+		if e.Monitored {
+			t.Fatal("series unmonitor should cascade to episodes")
+		}
+	}
+}
