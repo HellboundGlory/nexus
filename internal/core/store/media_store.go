@@ -365,3 +365,36 @@ func (s *Store) SetMovieMonitored(ctx context.Context, id int64, monitored bool)
 	_, err := s.db.ExecContext(ctx, `UPDATE movies SET monitored=? WHERE id=?`, boolToInt(monitored), id)
 	return err
 }
+
+func (s *Store) GetSeason(ctx context.Context, id int64) (*Season, error) {
+	var se Season
+	var m int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id, series_id, season_number, monitored FROM seasons WHERE id = ?`, id).
+		Scan(&se.ID, &se.SeriesID, &se.SeasonNumber, &m)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	se.Monitored = m != 0
+	return &se, nil
+}
+
+func (s *Store) GetEpisode(ctx context.Context, id int64) (*Episode, error) {
+	var e Episode
+	var m int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id, series_id, season_number, episode_number, tmdb_id, title, overview, air_date, monitored
+		 FROM episodes WHERE id = ?`, id).
+		Scan(&e.ID, &e.SeriesID, &e.SeasonNumber, &e.EpisodeNumber, &e.TMDBID, &e.Title, &e.Overview, &e.AirDate, &m)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	e.Monitored = m != 0
+	return &e, nil
+}
