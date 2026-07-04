@@ -109,11 +109,6 @@ type DownloadClient interface {
 	Test(ctx context.Context) error
 }
 
-type MetadataProvider interface {
-	ID() string
-	Kind() MediaKind
-}
-
 // Registry is a concurrency-safe id→provider map.
 type Registry[T any] struct {
 	mu    sync.RWMutex
