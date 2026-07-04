@@ -36,3 +36,14 @@ func TestLoadRejectsBadPort(t *testing.T) {
 		t.Fatal("expected error for non-numeric port")
 	}
 }
+
+func TestLoadReadsTMDBAPIKey(t *testing.T) {
+	env := map[string]string{"NEXUS_TMDB_API_KEY": "tmdbkey"}
+	c, err := Load(func(k string) string { return env[k] })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.TMDBAPIKey != "tmdbkey" {
+		t.Fatalf("TMDBAPIKey = %q want tmdbkey", c.TMDBAPIKey)
+	}
+}

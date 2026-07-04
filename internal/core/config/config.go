@@ -9,12 +9,13 @@ import (
 )
 
 type Config struct {
-	DataDir  string
-	Host     string
-	Port     int
-	URLBase  string
-	LogLevel string
-	APIKey   string
+	DataDir    string
+	Host       string
+	Port       int
+	URLBase    string
+	LogLevel   string
+	APIKey     string
+	TMDBAPIKey string
 }
 
 func (c *Config) Addr() string { return net.JoinHostPort(c.Host, strconv.Itoa(c.Port)) }
@@ -55,6 +56,9 @@ func Load(getenv func(string) string) (*Config, error) {
 			return nil, err
 		}
 		c.APIKey = key
+	}
+	if v := getenv("NEXUS_TMDB_API_KEY"); v != "" {
+		c.TMDBAPIKey = v
 	}
 	return c, nil
 }
