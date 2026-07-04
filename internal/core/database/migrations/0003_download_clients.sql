@@ -1,0 +1,21 @@
+CREATE TABLE download_clients (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    name           TEXT NOT NULL,
+    implementation TEXT NOT NULL,
+    protocol       TEXT NOT NULL,
+    host           TEXT NOT NULL DEFAULT '',
+    port           INTEGER NOT NULL DEFAULT 0,
+    use_ssl        INTEGER NOT NULL DEFAULT 0,
+    url_base       TEXT NOT NULL DEFAULT '',
+    username       TEXT NOT NULL DEFAULT '',
+    api_key        TEXT NOT NULL DEFAULT '',
+    category       TEXT NOT NULL DEFAULT '',
+    enabled        INTEGER NOT NULL DEFAULT 1,
+    priority       INTEGER NOT NULL DEFAULT 25,
+    settings       TEXT NOT NULL DEFAULT '{}',
+    status         TEXT NOT NULL DEFAULT 'unknown',
+    last_check     DATETIME,
+    fail_message   TEXT NOT NULL DEFAULT '',
+    created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);

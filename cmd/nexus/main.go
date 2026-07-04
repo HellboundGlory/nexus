@@ -26,6 +26,7 @@ import (
 	"github.com/hellboundg/nexus/internal/core/scheduler"
 	"github.com/hellboundg/nexus/internal/core/store"
 	"github.com/hellboundg/nexus/internal/core/version"
+	"github.com/hellboundg/nexus/internal/downloadclient"
 	"github.com/hellboundg/nexus/internal/indexer"
 	"github.com/hellboundg/nexus/web"
 )
@@ -80,17 +81,25 @@ func run(ctx context.Context) error {
 	}
 	idxAPI := indexer.NewAPI(st, idxSvc, &http.Client{Timeout: 30 * time.Second})
 
+	dlSvc := downloadclient.NewService(st)
+	if err := dlSvc.Reload(ctx); err != nil {
+		return err
+	}
+	dlAPI := downloadclient.NewAPI(st, dlSvc)
+	dlMonitor := downloadclient.NewMonitor(dlSvc, bus)
+
 	sch := scheduler.New(mgr)
 	sch.Every(15*time.Minute, func() command.Command {
 		return indexer.NewHealthCheck(st, bus, &http.Client{Timeout: 30 * time.Second})
 	})
+	sch.Every(1*time.Minute, func() command.Command { return dlMonitor })
 	sch.Start()
 
 	authSvc := auth.NewService(st, cfg.APIKey)
 	router := api.NewRouter(api.Deps{
 		Auth: authSvc, Store: st, Version: version.Version(), Bus: bus,
-		WSForward: []string{"indexer.status"},
-	}, web.Handler(), idxAPI.Mount)
+		WSForward: []string{"indexer.status", "download.status"},
+	}, web.Handler(), idxAPI.Mount, dlAPI.Mount)
 
 	srv := &http.Server{Addr: cfg.Addr(), Handler: router}
 	go func() {
