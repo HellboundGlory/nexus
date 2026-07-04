@@ -27,6 +27,9 @@ type TMDBClient struct {
 	http   *http.Client
 }
 
+// NewTMDBProvider builds the production TMDb client (default base, 30s timeout).
+func NewTMDBProvider(apiKey string) *TMDBClient { return newTMDB(apiKey, "", nil) }
+
 func newTMDB(apiKey, base string, hc *http.Client) *TMDBClient {
 	if base == "" {
 		base = tmdbBaseURL
