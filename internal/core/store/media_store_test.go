@@ -77,3 +77,37 @@ func TestSeriesAndEpisodeUpsert(t *testing.T) {
 		t.Fatalf("expected episodes gone after series delete, got %d", len(eps))
 	}
 }
+
+func TestMovieCRUD(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	id, err := s.CreateMovie(ctx, Movie{TMDBID: 200, Title: "Film", SortTitle: "film", Year: 2020, Monitored: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateMovie(ctx, Movie{TMDBID: 200, Title: "Dup"}); err == nil {
+		t.Fatal("expected duplicate tmdb_id to error")
+	}
+	m, err := s.GetMovie(ctx, id)
+	if err != nil || m.Title != "Film" || m.Year != 2020 || !m.Monitored {
+		t.Fatalf("get: %+v err=%v", m, err)
+	}
+	m.Title = "Film 2"
+	if err := s.UpdateMovie(ctx, *m); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetMovieMonitored(ctx, id, false); err != nil {
+		t.Fatal(err)
+	}
+	all, err := s.ListMovies(ctx)
+	if err != nil || len(all) != 1 || all[0].Title != "Film 2" || all[0].Monitored {
+		t.Fatalf("list: %+v err=%v", all, err)
+	}
+	if err := s.DeleteMovie(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.GetMovie(ctx, id); err != ErrNotFound {
+		t.Fatalf("want ErrNotFound got %v", err)
+	}
+}

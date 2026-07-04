@@ -259,3 +259,109 @@ func (s *Store) SetSeriesEpisodesMonitored(ctx context.Context, seriesID int64, 
 	_, err := s.db.ExecContext(ctx, `UPDATE episodes SET monitored=? WHERE series_id=?`, boolToInt(monitored), seriesID)
 	return err
 }
+
+type Movie struct {
+	ID               int64      `json:"id"`
+	TMDBID           int        `json:"tmdbId"`
+	Title            string     `json:"title"`
+	SortTitle        string     `json:"sortTitle"`
+	Overview         string     `json:"overview"`
+	Status           string     `json:"status"`
+	Year             int        `json:"year"`
+	ReleaseDate      string     `json:"releaseDate"`
+	Runtime          int        `json:"runtime"`
+	IMDbID           string     `json:"imdbId"`
+	PosterURL        string     `json:"posterUrl"`
+	FanartURL        string     `json:"fanartUrl"`
+	RootFolderID     *int64     `json:"rootFolderId"`
+	QualityProfileID *int64     `json:"qualityProfileId"`
+	Monitored        bool       `json:"monitored"`
+	AddedAt          time.Time  `json:"addedAt"`
+	LastRefreshedAt  *time.Time `json:"lastRefreshedAt"`
+}
+
+const movieSelect = `SELECT id, tmdb_id, title, sort_title, overview, status, year, release_date,
+	runtime, imdb_id, poster_url, fanart_url, root_folder_id, quality_profile_id, monitored,
+	added_at, last_refreshed_at FROM movies`
+
+func scanMovieRow(row rowScanner) (*Movie, error) {
+	var m Movie
+	var monitored int
+	var rootID, qpID sql.NullInt64
+	var lastRef sql.NullTime
+	err := row.Scan(&m.ID, &m.TMDBID, &m.Title, &m.SortTitle, &m.Overview, &m.Status, &m.Year,
+		&m.ReleaseDate, &m.Runtime, &m.IMDbID, &m.PosterURL, &m.FanartURL, &rootID, &qpID,
+		&monitored, &m.AddedAt, &lastRef)
+	if err != nil {
+		return nil, err
+	}
+	m.Monitored = monitored != 0
+	if rootID.Valid {
+		m.RootFolderID = &rootID.Int64
+	}
+	if qpID.Valid {
+		m.QualityProfileID = &qpID.Int64
+	}
+	if lastRef.Valid {
+		m.LastRefreshedAt = &lastRef.Time
+	}
+	return &m, nil
+}
+
+func (s *Store) CreateMovie(ctx context.Context, m Movie) (int64, error) {
+	res, err := s.db.ExecContext(ctx,
+		`INSERT INTO movies (tmdb_id, title, sort_title, overview, status, year, release_date, runtime,
+		 imdb_id, poster_url, fanart_url, root_folder_id, quality_profile_id, monitored)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		m.TMDBID, m.Title, m.SortTitle, m.Overview, m.Status, m.Year, m.ReleaseDate, m.Runtime,
+		m.IMDbID, m.PosterURL, m.FanartURL, m.RootFolderID, m.QualityProfileID, boolToInt(m.Monitored))
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+func (s *Store) GetMovie(ctx context.Context, id int64) (*Movie, error) {
+	m, err := scanMovieRow(s.db.QueryRowContext(ctx, movieSelect+` WHERE id = ?`, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return m, err
+}
+
+func (s *Store) ListMovies(ctx context.Context) ([]Movie, error) {
+	rows, err := s.db.QueryContext(ctx, movieSelect+` ORDER BY sort_title ASC, id ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Movie
+	for rows.Next() {
+		m, err := scanMovieRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *m)
+	}
+	return out, rows.Err()
+}
+
+// UpdateMovie updates descriptive fields only (not monitored — use SetMovieMonitored).
+func (s *Store) UpdateMovie(ctx context.Context, m Movie) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE movies SET title=?, sort_title=?, overview=?, status=?, year=?, release_date=?, runtime=?,
+		 imdb_id=?, poster_url=?, fanart_url=?, last_refreshed_at=CURRENT_TIMESTAMP WHERE id=?`,
+		m.Title, m.SortTitle, m.Overview, m.Status, m.Year, m.ReleaseDate, m.Runtime,
+		m.IMDbID, m.PosterURL, m.FanartURL, m.ID)
+	return err
+}
+
+func (s *Store) DeleteMovie(ctx context.Context, id int64) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM movies WHERE id = ?`, id)
+	return err
+}
+
+func (s *Store) SetMovieMonitored(ctx context.Context, id int64, monitored bool) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE movies SET monitored=? WHERE id=?`, boolToInt(monitored), id)
+	return err
+}
