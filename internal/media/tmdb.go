@@ -67,7 +67,9 @@ func (c *TMDBClient) get(ctx context.Context, path string, q url.Values, out any
 	q.Set("api_key", c.apiKey)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+path+"?"+q.Encode(), nil)
 	if err != nil {
-		return err
+		// Return the bare sentinel, never the raw error: a *url.Error here would
+		// embed the full URL including ?api_key=, leaking the write-only credential.
+		return ErrProviderUnavailable
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {

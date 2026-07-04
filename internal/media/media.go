@@ -289,9 +289,10 @@ func (s *Service) RefreshMovie(ctx context.Context, id int64) error {
 	return nil
 }
 
-// RefreshAll refreshes every monitored series and movie. It is best-effort: a
-// single item's provider failure is swallowed so one bad item doesn't abort
-// the sweep, and RefreshAll always returns nil.
+// RefreshAll refreshes every monitored series and movie. It is best-effort per
+// item: a single item's provider failure is swallowed so one bad item doesn't
+// abort the sweep. It returns an error only if the initial ListSeries/ListMovies
+// query fails.
 func (s *Service) RefreshAll(ctx context.Context) error {
 	series, err := s.store.ListSeries(ctx)
 	if err != nil {
