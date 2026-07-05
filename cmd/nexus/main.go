@@ -29,6 +29,7 @@ import (
 	"github.com/hellboundg/nexus/internal/downloadclient"
 	"github.com/hellboundg/nexus/internal/indexer"
 	"github.com/hellboundg/nexus/internal/media"
+	"github.com/hellboundg/nexus/internal/quality"
 	"github.com/hellboundg/nexus/web"
 )
 
@@ -94,6 +95,9 @@ func run(ctx context.Context) error {
 	mediaAPI := media.NewAPI(st, mediaSvc)
 	mediaRefresh := media.NewRefresh(mediaSvc)
 
+	qualitySvc := quality.NewService(st)
+	qualityAPI := quality.NewAPI(qualitySvc)
+
 	sch := scheduler.New(mgr)
 	sch.Every(15*time.Minute, func() command.Command {
 		return indexer.NewHealthCheck(st, bus, &http.Client{Timeout: 30 * time.Second})
@@ -106,7 +110,7 @@ func run(ctx context.Context) error {
 	router := api.NewRouter(api.Deps{
 		Auth: authSvc, Store: st, Version: version.Version(), Bus: bus,
 		WSForward: []string{"indexer.status", "download.status", "media.series.updated", "media.movie.updated"},
-	}, web.Handler(), idxAPI.Mount, dlAPI.Mount, mediaAPI.Mount)
+	}, web.Handler(), idxAPI.Mount, dlAPI.Mount, mediaAPI.Mount, qualityAPI.Mount)
 
 	srv := &http.Server{Addr: cfg.Addr(), Handler: router}
 	go func() {
