@@ -135,3 +135,141 @@ func TestSearchMovieNoProfileStops(t *testing.T) {
 		t.Fatalf("no search without a profile, got %+v", fs.lastQuery)
 	}
 }
+
+func seedSeries(t *testing.T, st *store.Store, monitored bool, epCount int) (seriesID int64, epIDs []int64) {
+	t.Helper()
+	ctx := context.Background()
+	prof, err := st.CreateQualityProfile(ctx, hdProfile())
+	if err != nil {
+		t.Fatal(err)
+	}
+	sid, err := st.CreateSeries(ctx, store.Series{TMDBID: 7, Title: "The Show", Monitored: monitored})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetSeriesQualityProfileID(ctx, sid, &prof.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertSeason(ctx, store.Season{SeriesID: sid, SeasonNumber: 1, Monitored: true}); err != nil {
+		t.Fatal(err)
+	}
+	for i := 1; i <= epCount; i++ {
+		if err := st.UpsertEpisode(ctx, store.Episode{SeriesID: sid, SeasonNumber: 1, EpisodeNumber: i, Monitored: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	eps, _ := st.ListEpisodes(ctx, sid)
+	for _, e := range eps {
+		epIDs = append(epIDs, e.ID)
+	}
+	return sid, epIDs
+}
+
+func TestSearchSeasonFullyMissingPrefersPack(t *testing.T) {
+	st := newStore(t)
+	sid, epIDs := seedSeries(t, st, true, 3)
+	fs := &fakeSearcher{releases: []provider.Release{
+		{Title: "The.Show.S01E01.1080p.BluRay.x264-GRP", DownloadURL: "single", Protocol: provider.ProtocolUsenet},
+		{Title: "The.Show.S01.1080p.BluRay.x264-GRP", DownloadURL: "pack", Protocol: provider.ProtocolUsenet},
+	}}
+	fe := &fakeEnqueuer{}
+	svc := NewService(st, fs, fe, nil)
+
+	n, err := svc.SearchSeason(context.Background(), sid, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 || len(fe.reqs) != 1 || fe.reqs[0].DownloadURL != "pack" {
+		t.Fatalf("fully-missing season should grab the pack once: n=%d reqs=%+v", n, fe.reqs)
+	}
+	if len(fe.reqs[0].EpisodeIDs) != 3 {
+		t.Fatalf("pack should carry all 3 missing episode ids, got %v", fe.reqs[0].EpisodeIDs)
+	}
+	if fs.lastQuery.Season == nil || *fs.lastQuery.Season != 1 || fs.lastQuery.Episode != nil {
+		t.Fatalf("pack search query should set season and not episode: %+v", fs.lastQuery)
+	}
+	_ = epIDs
+}
+
+func TestSearchSeasonNoPackFallsBackToEpisodes(t *testing.T) {
+	st := newStore(t)
+	sid, _ := seedSeries(t, st, true, 2)
+	// Searcher returns only per-episode singles regardless of query (no pack).
+	fs := &fakeSearcher{releases: []provider.Release{
+		{Title: "The.Show.S01E01.1080p.BluRay.x264-GRP", DownloadURL: "e1", Protocol: provider.ProtocolUsenet},
+		{Title: "The.Show.S01E02.1080p.BluRay.x264-GRP", DownloadURL: "e2", Protocol: provider.ProtocolUsenet},
+	}}
+	fe := &fakeEnqueuer{}
+	svc := NewService(st, fs, fe, nil)
+
+	n, err := svc.SearchSeason(context.Background(), sid, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 || len(fe.reqs) != 2 {
+		t.Fatalf("no acceptable pack should fall back to 2 per-episode grabs: n=%d reqs=%d", n, len(fe.reqs))
+	}
+	for _, r := range fe.reqs {
+		if len(r.EpisodeIDs) != 1 {
+			t.Fatalf("per-episode grab should carry exactly one episode id, got %v", r.EpisodeIDs)
+		}
+	}
+}
+
+func TestSearchSeasonPartiallyMissingSearchesEpisodesOnly(t *testing.T) {
+	st := newStore(t)
+	sid, epIDs := seedSeries(t, st, true, 2)
+	// Give episode 1 a media file so the season is only partially missing.
+	if _, err := st.UpsertMediaFile(context.Background(), store.MediaFile{MediaKind: "tv", EpisodeID: &epIDs[0], RelativePath: "e1.mkv", QualityID: 9}); err != nil {
+		t.Fatal(err)
+	}
+	fs := &fakeSearcher{releases: []provider.Release{
+		{Title: "The.Show.S01E02.1080p.BluRay.x264-GRP", DownloadURL: "e2", Protocol: provider.ProtocolUsenet},
+	}}
+	fe := &fakeEnqueuer{}
+	svc := NewService(st, fs, fe, nil)
+
+	n, err := svc.SearchSeason(context.Background(), sid, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 || len(fe.reqs) != 1 || fe.reqs[0].EpisodeIDs[0] != epIDs[1] {
+		t.Fatalf("only the missing episode 2 should be grabbed: n=%d reqs=%+v", n, fe.reqs)
+	}
+	if fs.lastQuery.Episode == nil {
+		t.Fatalf("partially-missing season must use per-episode queries: %+v", fs.lastQuery)
+	}
+}
+
+func TestSearchEpisodeSingle(t *testing.T) {
+	st := newStore(t)
+	sid, epIDs := seedSeries(t, st, true, 2)
+	_ = sid
+	fs := &fakeSearcher{releases: []provider.Release{
+		{Title: "The.Show.S01E01.1080p.BluRay.x264-GRP", DownloadURL: "e1", Protocol: provider.ProtocolUsenet},
+	}}
+	fe := &fakeEnqueuer{}
+	svc := NewService(st, fs, fe, nil)
+	n, err := svc.SearchEpisode(context.Background(), epIDs[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 || len(fe.reqs) != 1 || fe.reqs[0].EpisodeIDs[0] != epIDs[0] {
+		t.Fatalf("episode search should grab that one episode: n=%d reqs=%+v", n, fe.reqs)
+	}
+}
+
+func TestSearchEpisodeSkipsWhenFiled(t *testing.T) {
+	st := newStore(t)
+	_, epIDs := seedSeries(t, st, true, 1)
+	if _, err := st.UpsertMediaFile(context.Background(), store.MediaFile{MediaKind: "tv", EpisodeID: &epIDs[0], RelativePath: "e1.mkv", QualityID: 9}); err != nil {
+		t.Fatal(err)
+	}
+	fs := &fakeSearcher{}
+	fe := &fakeEnqueuer{}
+	svc := NewService(st, fs, fe, nil)
+	n, err := svc.SearchEpisode(context.Background(), epIDs[0])
+	if err != nil || n != 0 || len(fe.reqs) != 0 {
+		t.Fatalf("already-filed episode must be skipped: n=%d err=%v reqs=%d", n, err, len(fe.reqs))
+	}
+}
