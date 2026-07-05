@@ -32,6 +32,13 @@ func (s *Service) searchMovie(ctx context.Context, movieID int64) (int, error) {
 	} else if f != nil {
 		return 0, nil // already have a file
 	}
+	activeMovies, _, err := s.activeQueue(ctx)
+	if err != nil {
+		return 0, err
+	}
+	if _, queued := activeMovies[m.ID]; queued {
+		return 0, nil // already grabbed, awaiting import
+	}
 	profile, ok, err := s.profileFor(ctx, m.QualityProfileID)
 	if err != nil || !ok {
 		return 0, err
@@ -66,6 +73,32 @@ func movieQuery(m *store.Movie) provider.Query {
 		q.TMDBID = m.TMDBID
 	}
 	return q
+}
+
+// activeQueue returns the sets of movie ids and episode ids that currently have
+// an in-flight download-queue row (grabbed or importing). Such items were
+// already grabbed but not yet imported (no media file exists yet), so a search
+// must not grab them again — this makes the sweep idempotent and prevents
+// duplicate grabs from concurrent manual+scheduled searches or stalled downloads.
+func (s *Service) activeQueue(ctx context.Context) (movies, episodes map[int64]struct{}, err error) {
+	rows, err := s.store.ListQueue(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	movies = map[int64]struct{}{}
+	episodes = map[int64]struct{}{}
+	for _, r := range rows {
+		if r.Status != store.QueueGrabbed && r.Status != store.QueueImporting {
+			continue
+		}
+		if r.MovieID != nil {
+			movies[*r.MovieID] = struct{}{}
+		}
+		for _, eid := range r.EpisodeIDs {
+			episodes[eid] = struct{}{}
+		}
+	}
+	return movies, episodes, nil
 }
 
 // profileFor loads the assigned quality profile. ok=false (no error) means the
@@ -125,12 +158,16 @@ func (s *Service) searchSeries(ctx context.Context, seriesID int64) (int, error)
 	if err != nil {
 		return 0, err
 	}
+	_, activeEps, err := s.activeQueue(ctx)
+	if err != nil {
+		return 0, err
+	}
 	total := 0
 	for _, sn := range seasons {
 		if !sn.Monitored {
 			continue
 		}
-		n, err := s.searchSeason(ctx, se, sn.SeasonNumber, eps, profile)
+		n, err := s.searchSeason(ctx, se, sn.SeasonNumber, eps, profile, activeEps)
 		if err != nil {
 			return total, err
 		}
@@ -162,14 +199,18 @@ func (s *Service) searchSeasonEntry(ctx context.Context, seriesID int64, seasonN
 	if err != nil {
 		return 0, err
 	}
-	return s.searchSeason(ctx, se, seasonNumber, eps, profile)
+	_, activeEps, err := s.activeQueue(ctx)
+	if err != nil {
+		return 0, err
+	}
+	return s.searchSeason(ctx, se, seasonNumber, eps, profile, activeEps)
 }
 
 // searchSeason searches a single season. If every monitored episode in the
 // season is missing, it tries a full-season pack first (enqueued with all
 // missing episode ids); otherwise, or if no acceptable pack is found, it falls
 // back to per-episode searches. eps is the full episode list for the series.
-func (s *Service) searchSeason(ctx context.Context, se *store.Series, seasonNumber int, eps []store.Episode, profile store.QualityProfile) (int, error) {
+func (s *Service) searchSeason(ctx context.Context, se *store.Series, seasonNumber int, eps []store.Episode, profile store.QualityProfile, activeEps map[int64]struct{}) (int, error) {
 	var monitored, missing []store.Episode
 	for _, e := range eps {
 		if e.SeasonNumber != seasonNumber || !e.Monitored {
@@ -180,7 +221,7 @@ func (s *Service) searchSeason(ctx context.Context, se *store.Series, seasonNumb
 		if err != nil {
 			return 0, err
 		}
-		if f == nil {
+		if _, queued := activeEps[e.ID]; f == nil && !queued {
 			missing = append(missing, e)
 		}
 	}
@@ -213,7 +254,7 @@ func (s *Service) searchSeason(ctx context.Context, se *store.Series, seasonNumb
 	}
 	total := 0
 	for _, e := range missing {
-		n, err := s.searchEpisode(ctx, se, e, profile)
+		n, err := s.searchEpisode(ctx, se, e, profile, activeEps)
 		if err != nil {
 			return total, err
 		}
@@ -245,17 +286,24 @@ func (s *Service) searchEpisodeEntry(ctx context.Context, episodeID int64) (int,
 	if err != nil || !ok {
 		return 0, err
 	}
-	return s.searchEpisode(ctx, se, *e, profile)
+	_, activeEps, err := s.activeQueue(ctx)
+	if err != nil {
+		return 0, err
+	}
+	return s.searchEpisode(ctx, se, *e, profile, activeEps)
 }
 
 // searchEpisode searches one episode and enqueues the best covering release.
-// Skips if the episode already has a file.
-func (s *Service) searchEpisode(ctx context.Context, se *store.Series, e store.Episode, profile store.QualityProfile) (int, error) {
+// Skips if the episode already has a file or is already in flight in the queue.
+func (s *Service) searchEpisode(ctx context.Context, se *store.Series, e store.Episode, profile store.QualityProfile, activeEps map[int64]struct{}) (int, error) {
 	f, err := s.store.MediaFileForEpisode(ctx, e.ID)
 	if err != nil {
 		return 0, err
 	}
 	if f != nil {
+		return 0, nil
+	}
+	if _, queued := activeEps[e.ID]; queued {
 		return 0, nil
 	}
 	ep := e.EpisodeNumber

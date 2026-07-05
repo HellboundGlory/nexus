@@ -282,3 +282,81 @@ func TestSearchEpisodeSkipsWhenFiled(t *testing.T) {
 		t.Fatalf("already-filed episode must be skipped: n=%d err=%v reqs=%d", n, err, len(fe.reqs))
 	}
 }
+
+func TestSearchMovieSkipsWhenAlreadyQueued(t *testing.T) {
+	st := newStore(t)
+	id := seedMovie(t, st, true, true)
+	mv := id
+	// An in-flight grab exists (no media file yet) — must not be re-grabbed.
+	if _, err := st.EnqueueGrab(context.Background(), store.QueueItem{
+		MediaKind: "movie", MovieID: &mv, Status: store.QueueGrabbed,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	fs := &fakeSearcher{releases: []provider.Release{
+		{Title: "The.Film.2020.1080p.BluRay.x264-GRP", DownloadURL: "u", Protocol: provider.ProtocolUsenet},
+	}}
+	fe := &fakeEnqueuer{}
+	svc := NewService(st, fs, fe, nil)
+	n, err := svc.SearchMovie(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 || len(fe.reqs) != 0 {
+		t.Fatalf("queued movie must not be re-grabbed: n=%d reqs=%d", n, len(fe.reqs))
+	}
+	if fs.lastQuery.Type != "" {
+		t.Fatalf("no search for an already-queued movie, got %+v", fs.lastQuery)
+	}
+}
+
+func TestSearchEpisodeSkipsWhenAlreadyQueued(t *testing.T) {
+	st := newStore(t)
+	sid, epIDs := seedSeries(t, st, true, 1)
+	ep := epIDs[0]
+	if _, err := st.EnqueueGrab(context.Background(), store.QueueItem{
+		MediaKind: "tv", SeriesID: &sid, EpisodeIDs: []int64{ep}, Status: store.QueueGrabbed,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	fs := &fakeSearcher{releases: []provider.Release{
+		{Title: "The.Show.S01E01.1080p.BluRay.x264-GRP", DownloadURL: "e1", Protocol: provider.ProtocolUsenet},
+	}}
+	fe := &fakeEnqueuer{}
+	svc := NewService(st, fs, fe, nil)
+	n, err := svc.SearchEpisode(context.Background(), ep)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 || len(fe.reqs) != 0 {
+		t.Fatalf("queued episode must not be re-grabbed: n=%d reqs=%d", n, len(fe.reqs))
+	}
+}
+
+func TestSearchSeasonTreatsQueuedEpisodeAsNotMissing(t *testing.T) {
+	st := newStore(t)
+	sid, epIDs := seedSeries(t, st, true, 2)
+	// ep1 is already actively queued; only ep2 is truly missing.
+	e1 := epIDs[0]
+	if _, err := st.EnqueueGrab(context.Background(), store.QueueItem{
+		MediaKind: "tv", SeriesID: &sid, EpisodeIDs: []int64{e1}, Status: store.QueueGrabbed,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	fs := &fakeSearcher{releases: []provider.Release{
+		{Title: "The.Show.S01E02.1080p.BluRay.x264-GRP", DownloadURL: "e2", Protocol: provider.ProtocolUsenet},
+	}}
+	fe := &fakeEnqueuer{}
+	svc := NewService(st, fs, fe, nil)
+	n, err := svc.SearchSeason(context.Background(), sid, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 || len(fe.reqs) != 1 || fe.reqs[0].EpisodeIDs[0] != epIDs[1] {
+		t.Fatalf("only the un-queued missing episode 2 should be grabbed: n=%d reqs=%+v", n, fe.reqs)
+	}
+	// Not fully missing (ep1 in flight) → per-episode search, not a pack.
+	if fs.lastQuery.Episode == nil {
+		t.Fatalf("should be a per-episode search, got %+v", fs.lastQuery)
+	}
+}

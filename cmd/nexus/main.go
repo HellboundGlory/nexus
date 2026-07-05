@@ -17,6 +17,7 @@ import (
 
 	lumberjack "gopkg.in/natefinch/lumberjack.v2"
 
+	"github.com/hellboundg/nexus/internal/automation"
 	"github.com/hellboundg/nexus/internal/core/api"
 	"github.com/hellboundg/nexus/internal/core/auth"
 	"github.com/hellboundg/nexus/internal/core/command"
@@ -28,7 +29,6 @@ import (
 	"github.com/hellboundg/nexus/internal/core/scheduler"
 	"github.com/hellboundg/nexus/internal/core/store"
 	"github.com/hellboundg/nexus/internal/core/version"
-	"github.com/hellboundg/nexus/internal/automation"
 	"github.com/hellboundg/nexus/internal/downloadclient"
 	"github.com/hellboundg/nexus/internal/importing"
 	"github.com/hellboundg/nexus/internal/indexer"
