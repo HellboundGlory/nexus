@@ -113,17 +113,23 @@ Comparer chain (applied as a stable sort, best-first; first non-zero wins):
 
 1. **Quality** — `quality.Compare(a.Parsed, b.Parsed, profile)` (profile rank,
    then revision). Higher is better.
-2. **Season-pack preference** — when searching a fully-missing season, prefer a
-   full-season pack (`Parsed.Season>0 && len(Parsed.Episodes)==0`) over singles.
-   (No effect on per-episode or movie searches.)
-3. **Torrent seeders** — when both are torrents, more seeders is better
-   (`Release.Seeders`); bucketed by `log10` to avoid trivial differences.
-4. **Usenet age** — when both are usenet, newer `PublishDate` is better, bucketed
-   (very-recent releases can be incomplete but for missing search newer is a safe
-   default; matches Sonarr's age bucketing intent).
-5. **Size** — larger is better, bucketed to ~200 MB, as a final tiebreak.
+2. **Torrent seeders** — when both are torrents, more `Release.Seeders` is better.
+3. **Usenet age** — when both are usenet, newer `PublishDate` is better (for
+   missing search newer is a safe default; matches Sonarr's age preference).
+4. **Size** — larger is better, as a final tiebreak.
 
-`Decide` performs no I/O and is exhaustively table-tested.
+Season-pack vs single-episode selection is **not** a comparer key — it is handled
+by the search strategy (which filters candidates to packs or singles depending on
+context), so the comparer stays context-free. `Decide` performs no I/O and is
+exhaustively table-tested.
+
+**Parser dependency (enabling change to 4b):** the 4b release-name parser
+(`internal/parsing`) currently recognizes a season only when at least one episode
+is present (`SxxExx`); a bare season-pack title (`Sxx`, `Season xx`) parses to
+`Season==0`. Season-pack search therefore requires a small additive extension to
+the parser to set `Season` (with `Episodes` empty) for season-pack titles. This
+is an enabling change scoped into 5a, fully covered by parser tests, and does not
+alter existing `SxxExx` behavior.
 
 ### 3.3 Wanted/missing strategies (`search.go`)
 
@@ -256,8 +262,9 @@ and cheap — automation picks, importing independently validates before grabbin
 - **`config_test.go`** — defaults when key absent; round-trip load/save.
 - **`api_test.go`** — route dispatch, 202 on search, 404 on bad id, config
   GET/PUT round-trip.
-- Boundary check in review: `go list -deps` confirms `automation` pulls in no
-  `indexer`/`downloadclient`/`media`/`naming`.
+- Boundary check in review: `go list -f '{{ .Imports }}'` confirms `automation`'s
+  **direct** imports include no `indexer`/`downloadclient`/`media`/`naming`.
+  (Transitive `naming` via `importing` is expected and allowed.)
 
 ## 7. Out of scope (5a)
 
