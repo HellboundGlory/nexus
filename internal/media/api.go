@@ -31,6 +31,7 @@ func (a *API) Mount(r chi.Router) {
 		r.Delete("/{id}", a.deleteSeries)
 		r.Post("/{id}/refresh", a.refreshSeries)
 		r.Put("/{id}/monitor", a.monitorSeries)
+		r.Put("/{id}/qualityprofile", a.assignSeriesProfile)
 	})
 	r.Put("/season/{id}/monitor", a.monitorSeason)
 	r.Put("/episode/{id}/monitor", a.monitorEpisode)
@@ -42,6 +43,7 @@ func (a *API) Mount(r chi.Router) {
 		r.Delete("/{id}", a.deleteMovie)
 		r.Post("/{id}/refresh", a.refreshMovie)
 		r.Put("/{id}/monitor", a.monitorMovie)
+		r.Put("/{id}/qualityprofile", a.assignMovieProfile)
 	})
 
 	r.Route("/rootfolder", func(r chi.Router) {
@@ -226,6 +228,10 @@ func (a *API) monitorSeries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := a.svc.SetSeriesMonitored(r.Context(), id, mon); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			api.WriteError(w, http.StatusNotFound, "not_found", "series not found")
+			return
+		}
 		api.WriteError(w, http.StatusInternalServerError, "internal", "failed to set monitored")
 		return
 	}
@@ -374,7 +380,57 @@ func (a *API) monitorMovie(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := a.svc.SetMovieMonitored(r.Context(), id, mon); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			api.WriteError(w, http.StatusNotFound, "not_found", "movie not found")
+			return
+		}
 		api.WriteError(w, http.StatusInternalServerError, "internal", "failed to set monitored")
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+type assignProfileBody struct {
+	QualityProfileID int64 `json:"qualityProfileId"`
+}
+
+func (a *API) assignSeriesProfile(w http.ResponseWriter, r *http.Request) {
+	id, ok := mediaID(w, r)
+	if !ok {
+		return
+	}
+	var b assignProfileBody
+	if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
+		api.WriteError(w, http.StatusBadRequest, "bad_request", "invalid JSON")
+		return
+	}
+	if err := a.svc.SetSeriesQualityProfile(r.Context(), id, b.QualityProfileID); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			api.WriteError(w, http.StatusNotFound, "not_found", "series or profile not found")
+			return
+		}
+		writeMediaError(w, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (a *API) assignMovieProfile(w http.ResponseWriter, r *http.Request) {
+	id, ok := mediaID(w, r)
+	if !ok {
+		return
+	}
+	var b assignProfileBody
+	if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
+		api.WriteError(w, http.StatusBadRequest, "bad_request", "invalid JSON")
+		return
+	}
+	if err := a.svc.SetMovieQualityProfile(r.Context(), id, b.QualityProfileID); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			api.WriteError(w, http.StatusNotFound, "not_found", "movie or profile not found")
+			return
+		}
+		writeMediaError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
