@@ -128,3 +128,85 @@ func (s *Store) DeleteQueueItem(ctx context.Context, id int64) error {
 	}
 	return nil
 }
+
+// MediaFile is one imported file on disk, linked to an episode or a movie.
+type MediaFile struct {
+	ID           int64     `json:"id"`
+	MediaKind    string    `json:"mediaKind"`
+	EpisodeID    *int64    `json:"episodeId,omitempty"`
+	MovieID      *int64    `json:"movieId,omitempty"`
+	RelativePath string    `json:"relativePath"`
+	Size         int64     `json:"size"`
+	QualityID    int       `json:"qualityId"`
+	AddedAt      time.Time `json:"addedAt"`
+}
+
+// UpsertMediaFile inserts a file row, replacing any existing file for the same
+// episode or movie (one current file per item, enforced by UNIQUE constraints).
+func (s *Store) UpsertMediaFile(ctx context.Context, f MediaFile) (MediaFile, error) {
+	if f.EpisodeID != nil {
+		if _, err := s.db.ExecContext(ctx, `DELETE FROM media_files WHERE episode_id = ?`, *f.EpisodeID); err != nil {
+			return MediaFile{}, err
+		}
+	}
+	if f.MovieID != nil {
+		if _, err := s.db.ExecContext(ctx, `DELETE FROM media_files WHERE movie_id = ?`, *f.MovieID); err != nil {
+			return MediaFile{}, err
+		}
+	}
+	res, err := s.db.ExecContext(ctx,
+		`INSERT INTO media_files (media_kind, episode_id, movie_id, relative_path, size, quality_id)
+		 VALUES (?, ?, ?, ?, ?, ?)`,
+		f.MediaKind, f.EpisodeID, f.MovieID, f.RelativePath, f.Size, f.QualityID)
+	if err != nil {
+		return MediaFile{}, err
+	}
+	id, _ := res.LastInsertId()
+	return s.getMediaFile(ctx, id)
+}
+
+func (s *Store) getMediaFile(ctx context.Context, id int64) (MediaFile, error) {
+	f, err := scanMediaFile(s.db.QueryRowContext(ctx,
+		`SELECT id, media_kind, episode_id, movie_id, relative_path, size, quality_id, added_at FROM media_files WHERE id = ?`, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return MediaFile{}, ErrNotFound
+	}
+	return f, err
+}
+
+func scanMediaFile(sc interface{ Scan(...any) error }) (MediaFile, error) {
+	var f MediaFile
+	err := sc.Scan(&f.ID, &f.MediaKind, &f.EpisodeID, &f.MovieID, &f.RelativePath, &f.Size, &f.QualityID, &f.AddedAt)
+	return f, err
+}
+
+func (s *Store) MediaFileForEpisode(ctx context.Context, episodeID int64) (*MediaFile, error) {
+	return s.mediaFileWhere(ctx, "episode_id", episodeID)
+}
+
+func (s *Store) MediaFileForMovie(ctx context.Context, movieID int64) (*MediaFile, error) {
+	return s.mediaFileWhere(ctx, "movie_id", movieID)
+}
+
+func (s *Store) mediaFileWhere(ctx context.Context, col string, id int64) (*MediaFile, error) {
+	f, err := scanMediaFile(s.db.QueryRowContext(ctx,
+		`SELECT id, media_kind, episode_id, movie_id, relative_path, size, quality_id, added_at FROM media_files WHERE `+col+` = ?`, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &f, nil
+}
+
+func (s *Store) DeleteMediaFile(ctx context.Context, id int64) error {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM media_files WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
