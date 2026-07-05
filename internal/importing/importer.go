@@ -19,10 +19,11 @@ func (s *Service) ImportItem(ctx context.Context, queueID int64) error {
 	if err != nil {
 		return err
 	}
-	outputPath, ok := s.completedOutputPath(ctx, row)
-	if !ok {
+	item, ok := matchItem(s.queue.Queue(ctx), row)
+	if !ok || item.Status != provider.StatusCompleted || item.OutputPath == "" {
 		return s.fail(ctx, row, "download not completed or not found")
 	}
+	outputPath := item.OutputPath
 	_ = s.store.SetQueueStatus(ctx, row.ID, store.QueueImporting, "")
 
 	cfg, err := s.NamingConfig(ctx)
@@ -55,12 +56,35 @@ func (s *Service) ImportItem(ctx context.Context, queueID int64) error {
 		return s.fail(ctx, row, fmt.Sprintf("incomplete import (%d file(s) placed)", placed))
 	}
 	_ = s.store.SetQueueStatus(ctx, row.ID, store.QueueImported, "")
-	if row.DownloadClientID != "" {
-		_ = s.queue.Remove(ctx, row.DownloadClientID, row.ClientItemID, false)
+	// Remove using the client id the item actually landed on (the queue row may
+	// have been enqueued without an explicit client override).
+	if item.DownloadClientID != "" && item.ID != "" {
+		_ = s.queue.Remove(ctx, item.DownloadClientID, item.ID, false)
 	}
 	s.emit(ctx, ImportCompletedEvent{QueueID: row.ID, Status: store.QueueImported})
 	s.emit(ctx, QueueUpdated{ID: row.ID})
 	return nil
+}
+
+// matchItem finds the live download-client item for a queue row. It keys on the
+// client item id (which must be non-empty) and only constrains the client id
+// when the row recorded one — a row enqueued without an explicit client override
+// (DownloadClientID == "") matches purely on the item id, since Grab routes by
+// protocol/priority and the landing client id is only known from the live item.
+func matchItem(items []provider.DownloadItem, row store.QueueItem) (provider.DownloadItem, bool) {
+	if row.ClientItemID == "" {
+		return provider.DownloadItem{}, false
+	}
+	for _, it := range items {
+		if it.ID != row.ClientItemID {
+			continue
+		}
+		if row.DownloadClientID != "" && it.DownloadClientID != row.DownloadClientID {
+			continue
+		}
+		return it, true
+	}
+	return provider.DownloadItem{}, false
 }
 
 // allTargetsHaveFiles reports whether every targeted episode (or the movie) now
@@ -77,20 +101,6 @@ func (s *Service) allTargetsHaveFiles(ctx context.Context, row store.QueueItem, 
 		}
 	}
 	return true
-}
-
-// completedOutputPath finds the client item for this row and returns its output
-// path if it is completed.
-func (s *Service) completedOutputPath(ctx context.Context, row store.QueueItem) (string, bool) {
-	for _, it := range s.queue.Queue(ctx) {
-		if it.DownloadClientID == row.DownloadClientID && it.ID == row.ClientItemID {
-			if it.Status == provider.StatusCompleted && it.OutputPath != "" {
-				return it.OutputPath, true
-			}
-			return "", false
-		}
-	}
-	return "", false
 }
 
 // importTarget is the resolved destination for one video file.
