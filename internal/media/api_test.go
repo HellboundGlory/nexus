@@ -120,6 +120,22 @@ func TestAPIAssignQualityProfile(t *testing.T) {
 	}
 }
 
+// Regression (4a backlog item a): toggling monitored on a missing id must 404,
+// not silently return 200 and emit a phantom media.*.updated event.
+func TestAPIMonitorMissingIs404(t *testing.T) {
+	fp := &fakeProvider{series: sampleSeries()}
+	r, _ := newTestAPI(t, fp)
+
+	for _, path := range []string{"/series/9999/monitor", "/movies/9999/monitor"} {
+		req := httptest.NewRequest(http.MethodPut, path, strings.NewReader(`{"monitored":false}`))
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusNotFound {
+			t.Fatalf("PUT %s on missing id status=%d want 404", path, w.Code)
+		}
+	}
+}
+
 // Guard: the TMDb key must never surface; series/movie JSON has no such field.
 // This test documents that the store structs carry no api key at all.
 func TestAPINoCredentialLeak(t *testing.T) {
