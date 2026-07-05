@@ -316,3 +316,62 @@ func containsInt(xs []int, v int) bool {
 	}
 	return false
 }
+
+// MissingSweep processes up to batch monitored targets that are missing files:
+// first monitored movies without a file, then monitored series (each of which
+// may fan out to several episode searches). Returns the total grabbed. A per-
+// target error is not fatal to the sweep — it is logged and the sweep continues.
+func (s *Service) MissingSweep(ctx context.Context, batch int) (int, error) {
+	if batch <= 0 {
+		batch = DefaultConfig().MissingSearchBatchSize
+	}
+	processed, total := 0, 0
+
+	movies, err := s.store.ListMovies(ctx)
+	if err != nil {
+		return 0, err
+	}
+	for _, m := range movies {
+		if processed >= batch {
+			return total, nil
+		}
+		if !m.Monitored {
+			continue
+		}
+		f, err := s.store.MediaFileForMovie(ctx, m.ID)
+		if err != nil {
+			return total, err
+		}
+		if f != nil {
+			continue
+		}
+		processed++
+		n, err := s.SearchMovie(ctx, m.ID)
+		if err != nil {
+			slog.Warn("automation: sweep movie search failed", "movieId", m.ID, "err", err)
+			continue
+		}
+		total += n
+	}
+
+	series, err := s.store.ListSeries(ctx)
+	if err != nil {
+		return total, err
+	}
+	for _, se := range series {
+		if processed >= batch {
+			return total, nil
+		}
+		if !se.Monitored {
+			continue
+		}
+		processed++
+		n, err := s.SearchSeries(ctx, se.ID)
+		if err != nil {
+			slog.Warn("automation: sweep series search failed", "seriesId", se.ID, "err", err)
+			continue
+		}
+		total += n
+	}
+	return total, nil
+}

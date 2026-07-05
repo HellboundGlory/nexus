@@ -3,6 +3,7 @@ package automation
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/hellboundg/nexus/internal/core/provider"
@@ -36,15 +37,23 @@ func (f *fakeEnqueuer) Enqueue(_ context.Context, req importing.EnqueueRequest) 
 	return store.QueueItem{ID: int64(len(f.reqs))}, nil
 }
 
+var movieSeq int
+
 func seedMovie(t *testing.T, st *store.Store, monitored bool, withProfile bool) int64 {
 	t.Helper()
 	ctx := context.Background()
-	id, err := st.CreateMovie(ctx, store.Movie{TMDBID: 42, IMDbID: "tt42", Title: "The Film", Year: 2020, Monitored: monitored})
+	movieSeq++
+	id, err := st.CreateMovie(ctx, store.Movie{
+		TMDBID: 42 + movieSeq, IMDbID: fmt.Sprintf("tt%d", 42+movieSeq),
+		Title: "The Film", Year: 2020, Monitored: monitored,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if withProfile {
-		prof, err := st.CreateQualityProfile(ctx, hdProfile())
+		p := hdProfile()
+		p.Name = fmt.Sprintf("HD-m%d", movieSeq)
+		prof, err := st.CreateQualityProfile(ctx, p)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -78,8 +87,8 @@ func TestSearchMovieEnqueuesBest(t *testing.T) {
 	if fe.reqs[0].MediaKind != provider.KindMovie || fe.reqs[0].MovieID != id {
 		t.Fatalf("bad enqueue request: %+v", fe.reqs[0])
 	}
-	if fs.lastQuery.Type != provider.SearchMovie || fs.lastQuery.IMDbID != "tt42" || fs.lastQuery.TMDBID != 42 {
-		t.Fatalf("bad query: %+v", fs.lastQuery)
+	if fs.lastQuery.Type != provider.SearchMovie || fs.lastQuery.IMDbID == "" || fs.lastQuery.TMDBID == 0 {
+		t.Fatalf("query should carry the movie's ids: %+v", fs.lastQuery)
 	}
 }
 
