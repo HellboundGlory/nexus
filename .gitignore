@@ -19,3 +19,6 @@ web/dist/*
 .DS_Store
 .idea/
 .vscode/
+
+# Claude Code local worktrees
+.claude/worktrees/
