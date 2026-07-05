@@ -38,20 +38,45 @@ func (s *Service) ImportItem(ctx context.Context, queueID int64) error {
 	}
 
 	kind := provider.MediaKind(row.MediaKind)
-	imported := 0
+	placed := 0
 	for _, f := range files {
-		if err := s.importFile(ctx, row, kind, cfg, f); err != nil {
+		ok, err := s.importFile(ctx, row, kind, cfg, f)
+		if err != nil {
 			return s.fail(ctx, row, err.Error())
 		}
-		imported++
+		if ok {
+			placed++
+		}
 	}
-	if imported == 0 {
-		return s.fail(ctx, row, "nothing imported")
+	if placed == 0 {
+		return s.fail(ctx, row, "no files imported (rejected as non-upgrade or unmatched)")
+	}
+	if !s.allTargetsHaveFiles(ctx, row, kind) {
+		return s.fail(ctx, row, fmt.Sprintf("incomplete import (%d file(s) placed)", placed))
 	}
 	_ = s.store.SetQueueStatus(ctx, row.ID, store.QueueImported, "")
+	if row.DownloadClientID != "" {
+		_ = s.queue.Remove(ctx, row.DownloadClientID, row.ClientItemID, false)
+	}
 	s.emit(ctx, ImportCompletedEvent{QueueID: row.ID, Status: store.QueueImported})
 	s.emit(ctx, QueueUpdated{ID: row.ID})
 	return nil
+}
+
+// allTargetsHaveFiles reports whether every targeted episode (or the movie) now
+// has a media_files row.
+func (s *Service) allTargetsHaveFiles(ctx context.Context, row store.QueueItem, kind provider.MediaKind) bool {
+	if kind == provider.KindMovie {
+		mf, _ := s.store.MediaFileForMovie(ctx, *row.MovieID)
+		return mf != nil
+	}
+	for _, id := range row.EpisodeIDs {
+		mf, _ := s.store.MediaFileForEpisode(ctx, id)
+		if mf == nil {
+			return false
+		}
+	}
+	return true
 }
 
 // completedOutputPath finds the client item for this row and returns its output
@@ -68,8 +93,18 @@ func (s *Service) completedOutputPath(ctx context.Context, row store.QueueItem) 
 	return "", false
 }
 
-// importFile places one video file for a movie or single episode (first import).
-func (s *Service) importFile(ctx context.Context, row store.QueueItem, kind provider.MediaKind, cfg naming.Config, srcFile string) error {
+// importTarget is the resolved destination for one video file.
+type importTarget struct {
+	episodeID *int64
+	movieID   *int64
+	dst       string
+}
+
+// importFile resolves the target for one video file and imports it, honoring
+// upgrades. Returns (imported, error): imported is false when the file was a
+// deliberate skip (no target match, or not an upgrade) that should not fail the
+// whole row on its own.
+func (s *Service) importFile(ctx context.Context, row store.QueueItem, kind provider.MediaKind, cfg naming.Config, srcFile string) (bool, error) {
 	parsed := parsing.Parse(filepath.Base(srcFile), kind)
 	q := quality.Resolve(parsed)
 	if q.ID == 0 {
@@ -79,36 +114,95 @@ func (s *Service) importFile(ctx context.Context, row store.QueueItem, kind prov
 	}
 	ext := filepath.Ext(srcFile)
 
+	target, profile, mf, err := s.resolveTarget(ctx, row, kind, cfg, parsed, q, ext)
+	if err != nil {
+		return false, err
+	}
+	if target == nil {
+		return false, nil // no matching library item for this file — skip
+	}
+
+	var existing *store.MediaFile
+	if target.episodeID != nil {
+		existing, _ = s.store.MediaFileForEpisode(ctx, *target.episodeID)
+	} else {
+		existing, _ = s.store.MediaFileForMovie(ctx, *target.movieID)
+	}
+	if existing != nil {
+		if !quality.IsUpgrade(q.ID, existing.QualityID, profile) {
+			qid := q.ID
+			_ = s.store.AddHistory(ctx, store.HistoryEvent{
+				EventType: "import_failed", MediaKind: row.MediaKind, SeriesID: row.SeriesID,
+				MovieID: row.MovieID, EpisodeID: target.episodeID, SourceTitle: row.SourceTitle,
+				QualityID: &qid, Message: "not an upgrade",
+			})
+			return false, nil
+		}
+	}
+
+	if err := placeFile(srcFile, target.dst); err != nil {
+		return false, err
+	}
+	root := s.mustRoot(ctx, row, kind)
+	rel, err := filepath.Rel(root, target.dst)
+	if err != nil {
+		rel = target.dst
+	}
+	fi, _ := os.Stat(target.dst)
+	var size int64
+	if fi != nil {
+		size = fi.Size()
+	}
+	mf.RelativePath = filepath.ToSlash(rel)
+	mf.Size = size
+	mf.QualityID = q.ID
+	if _, err := s.store.UpsertMediaFile(ctx, mf); err != nil {
+		return false, err
+	}
+	if existing != nil {
+		_ = os.Remove(filepath.Join(root, filepath.FromSlash(existing.RelativePath)))
+	}
+	evt := "imported"
+	if existing != nil {
+		evt = "upgraded"
+	}
+	qid := q.ID
+	_ = s.store.AddHistory(ctx, store.HistoryEvent{
+		EventType: evt, MediaKind: row.MediaKind, SeriesID: row.SeriesID, MovieID: row.MovieID,
+		EpisodeID: target.episodeID, SourceTitle: row.SourceTitle, QualityID: &qid,
+	})
+	return true, nil
+}
+
+// resolveTarget builds the destination path + media_files template for one file.
+func (s *Service) resolveTarget(ctx context.Context, row store.QueueItem, kind provider.MediaKind, cfg naming.Config, parsed parsing.ParsedRelease, q quality.QualityDefinition, ext string) (*importTarget, store.QualityProfile, store.MediaFile, error) {
 	if kind == provider.KindMovie {
 		m, err := s.store.GetMovie(ctx, *row.MovieID)
 		if err != nil {
-			return err
+			return nil, store.QualityProfile{}, store.MediaFile{}, err
 		}
+		profile, _ := s.profileFor(ctx, kind, 0, *row.MovieID)
 		root, err := s.rootPath(ctx, m.RootFolderID)
 		if err != nil {
-			return err
+			return nil, store.QualityProfile{}, store.MediaFile{}, err
 		}
 		tok := naming.Tokens{MovieTitle: m.Title, Year: m.Year, Quality: q.Name, ReleaseGroup: parsed.ReleaseGroup}
 		dst := filepath.Join(root, naming.Sanitize(naming.Render(cfg.MovieFolder, tok)), naming.Sanitize(naming.Render(cfg.MovieFile, tok))+ext)
-		return s.placeAndRecord(ctx, row, dst, root, srcFile, q, store.MediaFile{MediaKind: "movie", MovieID: row.MovieID})
+		return &importTarget{movieID: row.MovieID, dst: dst}, profile, store.MediaFile{MediaKind: "movie", MovieID: row.MovieID}, nil
 	}
 
-	// TV: single episode = the one recorded episode id.
-	if len(row.EpisodeIDs) != 1 {
-		return fmt.Errorf("season-pack import not handled in this task")
-	}
-	epID := row.EpisodeIDs[0]
-	ep, err := s.store.GetEpisode(ctx, epID)
-	if err != nil {
-		return err
-	}
 	se, err := s.store.GetSeries(ctx, *row.SeriesID)
 	if err != nil {
-		return err
+		return nil, store.QualityProfile{}, store.MediaFile{}, err
 	}
+	profile, _ := s.profileFor(ctx, kind, *row.SeriesID, 0)
 	root, err := s.rootPath(ctx, se.RootFolderID)
 	if err != nil {
-		return err
+		return nil, store.QualityProfile{}, store.MediaFile{}, err
+	}
+	ep := s.matchEpisode(ctx, row.EpisodeIDs, parsed)
+	if ep == nil {
+		return nil, profile, store.MediaFile{}, nil
 	}
 	tok := naming.Tokens{
 		SeriesTitle: se.Title, EpisodeTitle: ep.Title, Quality: q.Name,
@@ -118,36 +212,50 @@ func (s *Service) importFile(ctx context.Context, row store.QueueItem, kind prov
 		naming.Sanitize(naming.Render(cfg.SeriesFolder, tok)),
 		naming.Sanitize(naming.Render(cfg.SeasonFolder, tok)),
 		naming.Sanitize(naming.Render(cfg.EpisodeFile, tok))+ext)
-	return s.placeAndRecord(ctx, row, dst, root, srcFile, q, store.MediaFile{MediaKind: "tv", EpisodeID: &epID})
+	epID := ep.ID
+	return &importTarget{episodeID: &epID, dst: dst}, profile, store.MediaFile{MediaKind: "tv", EpisodeID: &epID}, nil
 }
 
-// placeAndRecord hardlinks the file, records the media_files row (relative to the
-// root folder), and writes an imported history entry.
-func (s *Service) placeAndRecord(ctx context.Context, row store.QueueItem, dst, root, srcFile string, q quality.QualityDefinition, mf store.MediaFile) error {
-	if err := placeFile(srcFile, dst); err != nil {
-		return err
+// matchEpisode returns the recorded episode whose season+number matches the
+// parse. For a single-file download with one recorded episode and no S/E in the
+// parse, it returns that episode.
+func (s *Service) matchEpisode(ctx context.Context, episodeIDs []int64, parsed parsing.ParsedRelease) *store.Episode {
+	if len(episodeIDs) == 1 && len(parsed.Episodes) == 0 {
+		ep, err := s.store.GetEpisode(ctx, episodeIDs[0])
+		if err != nil {
+			return nil
+		}
+		return ep
 	}
-	rel, err := filepath.Rel(root, dst)
-	if err != nil {
-		rel = dst
+	for _, id := range episodeIDs {
+		ep, err := s.store.GetEpisode(ctx, id)
+		if err != nil {
+			continue
+		}
+		for _, n := range parsed.Episodes {
+			if ep.SeasonNumber == parsed.Season && ep.EpisodeNumber == n {
+				return ep
+			}
+		}
 	}
-	fi, _ := os.Stat(dst)
-	var size int64
-	if fi != nil {
-		size = fi.Size()
-	}
-	mf.RelativePath = filepath.ToSlash(rel)
-	mf.Size = size
-	mf.QualityID = q.ID
-	if _, err := s.store.UpsertMediaFile(ctx, mf); err != nil {
-		return err
-	}
-	qid := q.ID
-	_ = s.store.AddHistory(ctx, store.HistoryEvent{
-		EventType: "imported", MediaKind: row.MediaKind, SeriesID: row.SeriesID, MovieID: row.MovieID,
-		EpisodeID: mf.EpisodeID, SourceTitle: row.SourceTitle, QualityID: &qid,
-	})
 	return nil
+}
+
+func (s *Service) mustRoot(ctx context.Context, row store.QueueItem, kind provider.MediaKind) string {
+	if kind == provider.KindMovie {
+		if m, err := s.store.GetMovie(ctx, *row.MovieID); err == nil {
+			if p, err := s.rootPath(ctx, m.RootFolderID); err == nil {
+				return p
+			}
+		}
+		return ""
+	}
+	if se, err := s.store.GetSeries(ctx, *row.SeriesID); err == nil {
+		if p, err := s.rootPath(ctx, se.RootFolderID); err == nil {
+			return p
+		}
+	}
+	return ""
 }
 
 func (s *Service) rootPath(ctx context.Context, rootFolderID *int64) (string, error) {
