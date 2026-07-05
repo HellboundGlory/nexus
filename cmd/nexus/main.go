@@ -23,10 +23,12 @@ import (
 	"github.com/hellboundg/nexus/internal/core/database"
 	"github.com/hellboundg/nexus/internal/core/events"
 	"github.com/hellboundg/nexus/internal/core/logging"
+	"github.com/hellboundg/nexus/internal/core/provider"
 	"github.com/hellboundg/nexus/internal/core/scheduler"
 	"github.com/hellboundg/nexus/internal/core/store"
 	"github.com/hellboundg/nexus/internal/core/version"
 	"github.com/hellboundg/nexus/internal/downloadclient"
+	"github.com/hellboundg/nexus/internal/importing"
 	"github.com/hellboundg/nexus/internal/indexer"
 	"github.com/hellboundg/nexus/internal/media"
 	"github.com/hellboundg/nexus/internal/quality"
@@ -98,19 +100,24 @@ func run(ctx context.Context) error {
 	qualitySvc := quality.NewService(st)
 	qualityAPI := quality.NewAPI(qualitySvc)
 
+	importSvc := importing.NewService(st, dlSvc, dlQueueAdapter{svc: dlSvc}, bus)
+	importAPI := importing.NewAPI(importSvc)
+	importCmd := importing.NewImportCommand(importSvc)
+
 	sch := scheduler.New(mgr)
 	sch.Every(15*time.Minute, func() command.Command {
 		return indexer.NewHealthCheck(st, bus, &http.Client{Timeout: 30 * time.Second})
 	})
 	sch.Every(1*time.Minute, func() command.Command { return dlMonitor })
 	sch.Every(12*time.Hour, func() command.Command { return mediaRefresh })
+	sch.Every(1*time.Minute, func() command.Command { return importCmd })
 	sch.Start()
 
 	authSvc := auth.NewService(st, cfg.APIKey)
 	router := api.NewRouter(api.Deps{
 		Auth: authSvc, Store: st, Version: version.Version(), Bus: bus,
-		WSForward: []string{"indexer.status", "download.status", "media.series.updated", "media.movie.updated"},
-	}, web.Handler(), idxAPI.Mount, dlAPI.Mount, mediaAPI.Mount, qualityAPI.Mount)
+		WSForward: []string{"indexer.status", "download.status", "media.series.updated", "media.movie.updated", "import.completed", "queue.updated"},
+	}, web.Handler(), idxAPI.Mount, dlAPI.Mount, mediaAPI.Mount, qualityAPI.Mount, importAPI.Mount)
 
 	srv := &http.Server{Addr: cfg.Addr(), Handler: router}
 	go func() {
@@ -162,4 +169,17 @@ func ensureAdmin(ctx context.Context, st *store.Store, log *slog.Logger) error {
 		log.Info("created initial admin user", "username", username)
 	}
 	return nil
+}
+
+// dlQueueAdapter exposes downloadclient.Service.Queue()'s items (dropping the
+// aggregate error wrapper) so importing's QueueReader interface is satisfied
+// without importing the downloadclient package into internal/importing.
+type dlQueueAdapter struct{ svc *downloadclient.Service }
+
+func (a dlQueueAdapter) Queue(ctx context.Context) []provider.DownloadItem {
+	return a.svc.Queue(ctx).Items
+}
+
+func (a dlQueueAdapter) Remove(ctx context.Context, clientID, itemID string, deleteData bool) error {
+	return a.svc.Remove(ctx, clientID, itemID, deleteData)
 }
