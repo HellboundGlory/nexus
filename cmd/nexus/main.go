@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -27,6 +28,7 @@ import (
 	"github.com/hellboundg/nexus/internal/core/scheduler"
 	"github.com/hellboundg/nexus/internal/core/store"
 	"github.com/hellboundg/nexus/internal/core/version"
+	"github.com/hellboundg/nexus/internal/automation"
 	"github.com/hellboundg/nexus/internal/downloadclient"
 	"github.com/hellboundg/nexus/internal/importing"
 	"github.com/hellboundg/nexus/internal/indexer"
@@ -104,6 +106,13 @@ func run(ctx context.Context) error {
 	importAPI := importing.NewAPI(importSvc)
 	importCmd := importing.NewImportCommand(importSvc)
 
+	autoSvc := automation.NewService(st, autoSearchAdapter{svc: idxSvc}, importSvc, bus)
+	autoAPI := automation.NewAPI(autoSvc, mgr)
+	autoCfg, err := autoSvc.Config(ctx)
+	if err != nil {
+		return err
+	}
+
 	sch := scheduler.New(mgr)
 	sch.Every(15*time.Minute, func() command.Command {
 		return indexer.NewHealthCheck(st, bus, &http.Client{Timeout: 30 * time.Second})
@@ -111,13 +120,16 @@ func run(ctx context.Context) error {
 	sch.Every(1*time.Minute, func() command.Command { return dlMonitor })
 	sch.Every(12*time.Hour, func() command.Command { return mediaRefresh })
 	sch.Every(1*time.Minute, func() command.Command { return importCmd })
+	sch.Every(time.Duration(autoCfg.MissingSearchIntervalHours)*time.Hour, func() command.Command {
+		return automation.NewMissingSearchCommand(autoSvc)
+	})
 	sch.Start()
 
 	authSvc := auth.NewService(st, cfg.APIKey)
 	router := api.NewRouter(api.Deps{
 		Auth: authSvc, Store: st, Version: version.Version(), Bus: bus,
-		WSForward: []string{"indexer.status", "download.status", "media.series.updated", "media.movie.updated", "import.completed", "queue.updated"},
-	}, web.Handler(), idxAPI.Mount, dlAPI.Mount, mediaAPI.Mount, qualityAPI.Mount, importAPI.Mount)
+		WSForward: []string{"indexer.status", "download.status", "media.series.updated", "media.movie.updated", "import.completed", "queue.updated", "automation.search.completed"},
+	}, web.Handler(), idxAPI.Mount, dlAPI.Mount, mediaAPI.Mount, qualityAPI.Mount, importAPI.Mount, autoAPI.Mount)
 
 	srv := &http.Server{Addr: cfg.Addr(), Handler: router}
 	go func() {
@@ -182,4 +194,19 @@ func (a dlQueueAdapter) Queue(ctx context.Context) []provider.DownloadItem {
 
 func (a dlQueueAdapter) Remove(ctx context.Context, clientID, itemID string, deleteData bool) error {
 	return a.svc.Remove(ctx, clientID, itemID, deleteData)
+}
+
+// autoSearchAdapter flattens indexer.Service.Search's SearchResult into the
+// ([]provider.Release, error) shape automation.Searcher expects, without
+// importing the indexer package into internal/automation. Per-indexer errors are
+// surfaced as a non-fatal aggregate error; the releases that succeeded are still
+// returned.
+type autoSearchAdapter struct{ svc *indexer.Service }
+
+func (a autoSearchAdapter) Search(ctx context.Context, q provider.Query) ([]provider.Release, error) {
+	res := a.svc.Search(ctx, q)
+	if len(res.IndexerErrors) > 0 {
+		return res.Releases, fmt.Errorf("automation: %d indexer error(s)", len(res.IndexerErrors))
+	}
+	return res.Releases, nil
 }
