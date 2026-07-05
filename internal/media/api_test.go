@@ -1,9 +1,11 @@
 package media
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -74,6 +76,63 @@ func TestAPIRootFolderLifecycle(t *testing.T) {
 	_ = json.Unmarshal(w.Body.Bytes(), &rf)
 	if rf.Path != "/data/tv" {
 		t.Fatalf("unexpected rootfolder: %+v", rf)
+	}
+}
+
+func TestAPIAssignQualityProfile(t *testing.T) {
+	fp := &fakeProvider{series: sampleSeries()}
+	r, st := newTestAPI(t, fp)
+
+	// create a profile directly in the store
+	prof, err := st.CreateQualityProfile(context.Background(), store.QualityProfile{
+		Name: "HD", CutoffQualityID: 9, UpgradeAllowed: true,
+		Items: []store.QualityProfileItem{{QualityID: 9, Allowed: true}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// add a series to assign to
+	addReq := httptest.NewRequest(http.MethodPost, "/series", strings.NewReader(`{"tmdbId":100,"monitorOption":"all"}`))
+	aw := httptest.NewRecorder()
+	r.ServeHTTP(aw, addReq)
+	if aw.Code != http.StatusCreated {
+		t.Fatalf("add series status=%d", aw.Code)
+	}
+	var se store.Series
+	_ = json.Unmarshal(aw.Body.Bytes(), &se)
+
+	// assign
+	body := `{"qualityProfileId":` + strconv.FormatInt(prof.ID, 10) + `}`
+	req := httptest.NewRequest(http.MethodPut, "/series/"+strconv.FormatInt(se.ID, 10)+"/qualityprofile", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("assign status=%d body=%s", w.Code, w.Body.String())
+	}
+
+	// assign to a missing series → 404
+	req = httptest.NewRequest(http.MethodPut, "/series/9999/qualityprofile", strings.NewReader(body))
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("assign to missing series status=%d want 404", w.Code)
+	}
+}
+
+// Regression (4a backlog item a): toggling monitored on a missing id must 404,
+// not silently return 200 and emit a phantom media.*.updated event.
+func TestAPIMonitorMissingIs404(t *testing.T) {
+	fp := &fakeProvider{series: sampleSeries()}
+	r, _ := newTestAPI(t, fp)
+
+	for _, path := range []string{"/series/9999/monitor", "/movies/9999/monitor"} {
+		req := httptest.NewRequest(http.MethodPut, path, strings.NewReader(`{"monitored":false}`))
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusNotFound {
+			t.Fatalf("PUT %s on missing id status=%d want 404", path, w.Code)
+		}
 	}
 }
 

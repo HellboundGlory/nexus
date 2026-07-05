@@ -364,3 +364,31 @@ func (s *Service) SetMovieMonitored(ctx context.Context, id int64, monitored boo
 	s.emitMovie(ctx, id)
 	return nil
 }
+
+// SetSeriesQualityProfile validates the profile exists, then assigns it. A
+// missing series or profile surfaces store.ErrNotFound (→404 at the handler).
+func (s *Service) SetSeriesQualityProfile(ctx context.Context, seriesID, profileID int64) error {
+	if _, err := s.store.GetQualityProfile(ctx, profileID); err != nil {
+		return err
+	}
+	pid := profileID
+	if err := s.store.SetSeriesQualityProfileID(ctx, seriesID, &pid); err != nil {
+		return err
+	}
+	s.emitSeries(ctx, seriesID)
+	return nil
+}
+
+// SetMovieQualityProfile validates the profile exists, then assigns it. A
+// missing movie or profile surfaces store.ErrNotFound (→404 at the handler).
+func (s *Service) SetMovieQualityProfile(ctx context.Context, movieID, profileID int64) error {
+	if _, err := s.store.GetQualityProfile(ctx, profileID); err != nil {
+		return err
+	}
+	pid := profileID
+	if err := s.store.SetMovieQualityProfileID(ctx, movieID, &pid); err != nil {
+		return err
+	}
+	s.emitMovie(ctx, movieID)
+	return nil
+}

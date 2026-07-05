@@ -172,8 +172,14 @@ func (s *Store) DeleteSeries(ctx context.Context, id int64) error {
 }
 
 func (s *Store) SetSeriesMonitored(ctx context.Context, id int64, monitored bool) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE series SET monitored=? WHERE id=?`, boolToInt(monitored), id)
-	return err
+	res, err := s.db.ExecContext(ctx, `UPDATE series SET monitored=? WHERE id=?`, boolToInt(monitored), id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (s *Store) UpsertSeason(ctx context.Context, se Season) error {
@@ -362,8 +368,14 @@ func (s *Store) DeleteMovie(ctx context.Context, id int64) error {
 }
 
 func (s *Store) SetMovieMonitored(ctx context.Context, id int64, monitored bool) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE movies SET monitored=? WHERE id=?`, boolToInt(monitored), id)
-	return err
+	res, err := s.db.ExecContext(ctx, `UPDATE movies SET monitored=? WHERE id=?`, boolToInt(monitored), id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (s *Store) GetSeason(ctx context.Context, id int64) (*Season, error) {
