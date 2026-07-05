@@ -244,6 +244,16 @@ and cheap — automation picks, importing independently validates before grabbin
   command result as "0 grabbed".
 - Grab failure on the best candidate → fall through to the next; only if all
   acceptable candidates fail is the item left missing this run.
+- **Already in flight → skip (no duplicate grabs).** A media file does not exist
+  until 4c imports a completed download, so between grab and import (and for
+  stalled downloads that never import) an item still reads as "missing". Before
+  searching, automation checks the download queue (`store.ListQueue`, rows in
+  `grabbed`/`importing`) and skips any target already in flight — a movie whose
+  id is queued, or an episode whose id appears in a queued row's `EpisodeIDs`. A
+  fully-missing-season determination also treats queued episodes as not-missing,
+  so a partially-in-flight season searches per-episode rather than re-grabbing a
+  pack. This makes the scheduled sweep idempotent and prevents concurrent
+  manual+scheduled searches from double-grabbing.
 - `ErrNoProfile` from `Enqueue` (item has no quality profile) → skip that item,
   log a warning; the sweep continues with the rest of the batch.
 - Missing/deleted item id on a manual command → 404.
