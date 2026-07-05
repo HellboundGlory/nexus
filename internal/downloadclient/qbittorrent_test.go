@@ -85,7 +85,7 @@ func TestQBittorrentItems(t *testing.T) {
 	if got := byID["aaa111"]; got.Status != provider.StatusDownloading || got.Progress != 42 || got.Protocol != provider.ProtocolTorrent || got.DownloadClientID != "2" {
 		t.Fatalf("downloading item wrong: %+v", got)
 	}
-	if got := byID["bbb222"]; got.Status != provider.StatusCompleted || got.Progress != 100 {
+	if got := byID["bbb222"]; got.Status != provider.StatusCompleted || got.Progress != 100 || got.OutputPath != "/downloads/Old.Show.S01.COMPLETE" {
 		t.Fatalf("completed item wrong: %+v", got)
 	}
 	if got := byID["ccc333"]; got.Status != provider.StatusFailed {

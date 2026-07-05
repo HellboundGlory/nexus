@@ -1,0 +1,98 @@
+// Package importing owns the grab-tracking download queue and the import
+// pipeline: it attributes completed downloads to library items, decides
+// accept/reject/upgrade, renames via templates, hardlinks files into root
+// folders, tracks files, and records history. It imports only internal/core/*,
+// internal/parsing, internal/quality, and internal/naming; download clients are
+// reached via the Grabber/QueueReader interfaces wired at the composition root.
+package importing
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+
+	"github.com/hellboundg/nexus/internal/core/events"
+	"github.com/hellboundg/nexus/internal/core/provider"
+	"github.com/hellboundg/nexus/internal/core/store"
+	"github.com/hellboundg/nexus/internal/naming"
+)
+
+// Grabber fetches a release and adds it to a download client, returning the
+// client's item id. Satisfied by downloadclient.Service.Grab.
+type Grabber interface {
+	Grab(ctx context.Context, req provider.DownloadRequest, clientID string) (string, error)
+}
+
+// QueueReader reads the aggregated download-client queue and removes items.
+// Satisfied by a thin adapter over downloadclient.Service at the composition root.
+type QueueReader interface {
+	Queue(ctx context.Context) []provider.DownloadItem
+	Remove(ctx context.Context, clientID, itemID string, deleteData bool) error
+}
+
+const namingSettingKey = "naming.config"
+
+// Service owns enqueue + import.
+type Service struct {
+	store *store.Store
+	grab  Grabber
+	queue QueueReader
+	bus   *events.Bus
+}
+
+func NewService(st *store.Store, grab Grabber, q QueueReader, bus *events.Bus) *Service {
+	return &Service{store: st, grab: grab, queue: q, bus: bus}
+}
+
+// NamingConfig returns the persisted config, or the defaults if none saved.
+func (s *Service) NamingConfig(ctx context.Context) (naming.Config, error) {
+	raw, ok, err := s.store.GetSetting(ctx, namingSettingKey)
+	if err != nil {
+		return naming.Config{}, err
+	}
+	if !ok {
+		return naming.DefaultConfig(), nil
+	}
+	var c naming.Config
+	if err := json.Unmarshal([]byte(raw), &c); err != nil {
+		return naming.Config{}, err
+	}
+	return c, nil
+}
+
+// SetNamingConfig persists the naming config.
+func (s *Service) SetNamingConfig(ctx context.Context, c naming.Config) error {
+	b, err := json.Marshal(c)
+	if err != nil {
+		return err
+	}
+	return s.store.SetSetting(ctx, namingSettingKey, string(b))
+}
+
+func (s *Service) emit(ctx context.Context, ev events.Event) {
+	if s.bus != nil {
+		s.bus.PublishAsync(ctx, ev)
+	}
+}
+
+// QueueUpdated is emitted when a queue row changes.
+type QueueUpdated struct {
+	ID int64 `json:"id"`
+}
+
+func (QueueUpdated) Name() string { return "queue.updated" }
+
+// ImportCompletedEvent is emitted after an import attempt on a row.
+type ImportCompletedEvent struct {
+	QueueID int64  `json:"queueId"`
+	Status  string `json:"status"`
+}
+
+func (ImportCompletedEvent) Name() string { return "import.completed" }
+
+var (
+	// ErrRejected means the release's quality is not allowed by the item's profile.
+	ErrRejected = errors.New("importing: release rejected by quality profile")
+	// ErrNoProfile means the target media item has no quality profile assigned.
+	ErrNoProfile = errors.New("importing: media item has no quality profile")
+)

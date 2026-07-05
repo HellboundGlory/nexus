@@ -68,7 +68,7 @@ func TestSABnzbdItems(t *testing.T) {
 	if got := byID["SABnzbd_nzo_bbb"]; got.Status != provider.StatusQueued {
 		t.Fatalf("queued item wrong: %+v", got)
 	}
-	if got := byID["SABnzbd_nzo_ccc"]; got.Status != provider.StatusCompleted || got.Size != 2147483648 {
+	if got := byID["SABnzbd_nzo_ccc"]; got.Status != provider.StatusCompleted || got.Size != 2147483648 || got.OutputPath != "/downloads/complete/Old.Movie.2020.1080p" {
 		t.Fatalf("completed item wrong: %+v", got)
 	}
 	if got := byID["SABnzbd_nzo_ddd"]; got.Status != provider.StatusFailed || got.ErrorMessage != "Unpacking failed" {

@@ -96,3 +96,22 @@ func Compare(a, b parsing.ParsedRelease, profile store.QualityProfile) int {
 	}
 	return 0
 }
+
+// IsUpgrade reports whether importing quality newID over an existing file of
+// quality existingID is a profile-sanctioned upgrade: upgrades must be enabled,
+// newID must rank strictly above existingID in the profile's item order, and the
+// existing quality must rank strictly below the profile's cutoff (once the cutoff
+// is met, no further upgrades). Qualities absent from the profile rank below all
+// present ones (profileRank returns -1).
+func IsUpgrade(newID, existingID int, profile store.QualityProfile) bool {
+	if !profile.UpgradeAllowed {
+		return false
+	}
+	newRank, _ := profileRank(profile, newID)
+	existingRank, _ := profileRank(profile, existingID)
+	cutoffRank, _ := profileRank(profile, profile.CutoffQualityID)
+	if existingRank >= cutoffRank {
+		return false
+	}
+	return newRank > existingRank
+}

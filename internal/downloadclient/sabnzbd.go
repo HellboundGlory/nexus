@@ -165,6 +165,7 @@ func (c *SABnzbdClient) Items(ctx context.Context) ([]provider.DownloadItem, err
 				Status      string `json:"status"`
 				Bytes       int64  `json:"bytes"`
 				FailMessage string `json:"fail_message"`
+				Storage     string `json:"storage"`
 			} `json:"slots"`
 		} `json:"history"`
 	}
@@ -199,6 +200,7 @@ func (c *SABnzbdClient) Items(ctx context.Context) ([]provider.DownloadItem, err
 			DownloadClientID: c.id,
 			Protocol:         provider.ProtocolUsenet,
 			ErrorMessage:     s.FailMessage,
+			OutputPath:       s.Storage,
 		}
 		if status == provider.StatusCompleted {
 			it.Progress = 100
