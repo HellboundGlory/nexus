@@ -1,5 +1,5 @@
 [
   {"hash":"aaa111","name":"The.Movie.2026.1080p.BluRay","size":2147483648,"progress":0.42,"state":"downloading","completed":901943132,"amount_left":1245540516},
-  {"hash":"bbb222","name":"Old.Show.S01.COMPLETE","size":1073741824,"progress":1.0,"state":"uploading","completed":1073741824,"amount_left":0},
+  {"hash":"bbb222","name":"Old.Show.S01.COMPLETE","size":1073741824,"progress":1.0,"state":"uploading","completed":1073741824,"amount_left":0,"content_path":"/downloads/Old.Show.S01.COMPLETE"},
   {"hash":"ccc333","name":"Stuck.Release","size":500,"progress":0.0,"state":"error","completed":0,"amount_left":500}
 ]

@@ -198,13 +198,14 @@ func (c *QBittorrentClient) Items(ctx context.Context) ([]provider.DownloadItem,
 		return nil, err
 	}
 	var raw []struct {
-		Hash       string  `json:"hash"`
-		Name       string  `json:"name"`
-		Size       int64   `json:"size"`
-		Progress   float64 `json:"progress"`
-		State      string  `json:"state"`
-		Completed  int64   `json:"completed"`
-		AmountLeft int64   `json:"amount_left"`
+		Hash        string  `json:"hash"`
+		Name        string  `json:"name"`
+		Size        int64   `json:"size"`
+		Progress    float64 `json:"progress"`
+		State       string  `json:"state"`
+		Completed   int64   `json:"completed"`
+		AmountLeft  int64   `json:"amount_left"`
+		ContentPath string  `json:"content_path"`
 	}
 	if err := json.Unmarshal(body, &raw); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidResponse, err)
@@ -220,6 +221,7 @@ func (c *QBittorrentClient) Items(ctx context.Context) ([]provider.DownloadItem,
 			Downloaded:       r.Completed,
 			DownloadClientID: c.id,
 			Protocol:         provider.ProtocolTorrent,
+			OutputPath:       r.ContentPath,
 		})
 	}
 	return items, nil

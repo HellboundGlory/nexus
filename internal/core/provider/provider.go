@@ -82,6 +82,7 @@ type DownloadItem struct {
 	DownloadClientID string         `json:"downloadClientId"`
 	Protocol         Protocol       `json:"protocol"`
 	ErrorMessage     string         `json:"errorMessage,omitempty"`
+	OutputPath       string         `json:"outputPath,omitempty"` // final on-disk path for completed items
 }
 
 // DownloadRequest is a grab. Content holds pre-fetched .nzb/.torrent bytes; it is
