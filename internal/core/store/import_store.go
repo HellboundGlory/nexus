@@ -210,3 +210,48 @@ func (s *Store) DeleteMediaFile(ctx context.Context, id int64) error {
 	}
 	return nil
 }
+
+// HistoryEvent is one append-only library event.
+type HistoryEvent struct {
+	ID          int64     `json:"id"`
+	EventType   string    `json:"eventType"`
+	MediaKind   string    `json:"mediaKind"`
+	SeriesID    *int64    `json:"seriesId,omitempty"`
+	EpisodeID   *int64    `json:"episodeId,omitempty"`
+	MovieID     *int64    `json:"movieId,omitempty"`
+	SourceTitle string    `json:"sourceTitle,omitempty"`
+	QualityID   *int      `json:"qualityId,omitempty"`
+	Message     string    `json:"message,omitempty"`
+	CreatedAt   time.Time `json:"createdAt"`
+}
+
+func (s *Store) AddHistory(ctx context.Context, h HistoryEvent) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO history (event_type, media_kind, series_id, episode_id, movie_id, source_title, quality_id, message)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		h.EventType, h.MediaKind, h.SeriesID, h.EpisodeID, h.MovieID, h.SourceTitle, h.QualityID, h.Message)
+	return err
+}
+
+func (s *Store) ListHistory(ctx context.Context, limit int) ([]HistoryEvent, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, event_type, media_kind, series_id, episode_id, movie_id, source_title, quality_id, message, created_at
+		 FROM history ORDER BY id DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []HistoryEvent
+	for rows.Next() {
+		var h HistoryEvent
+		if err := rows.Scan(&h.ID, &h.EventType, &h.MediaKind, &h.SeriesID, &h.EpisodeID, &h.MovieID,
+			&h.SourceTitle, &h.QualityID, &h.Message, &h.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, h)
+	}
+	return out, rows.Err()
+}

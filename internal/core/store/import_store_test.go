@@ -102,3 +102,21 @@ func TestMediaFileUpsertAndLookup(t *testing.T) {
 		t.Fatalf("expected nil file, got %+v err=%v", nf, err)
 	}
 }
+
+func TestHistoryAppendAndList(t *testing.T) {
+	st := newImportTestStore(t)
+	ctx := context.Background()
+	if err := st.AddHistory(ctx, HistoryEvent{EventType: "grabbed", MediaKind: "tv", SourceTitle: "A"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.AddHistory(ctx, HistoryEvent{EventType: "imported", MediaKind: "tv", SourceTitle: "B"}); err != nil {
+		t.Fatal(err)
+	}
+	list, err := st.ListHistory(ctx, 10)
+	if err != nil || len(list) != 2 {
+		t.Fatalf("history len = %d err=%v", len(list), err)
+	}
+	if list[0].SourceTitle != "B" { // newest first
+		t.Fatalf("expected newest first, got %q", list[0].SourceTitle)
+	}
+}
