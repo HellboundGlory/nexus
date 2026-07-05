@@ -13,6 +13,7 @@ var (
 	reProper     = regexp.MustCompile(`(?i)\bproper\b`)
 	reRepack     = regexp.MustCompile(`(?i)\brepack\b`)
 	reSeasonEp   = regexp.MustCompile(`(?i)\bS(\d{1,2})((?:E\d{1,2})+)(?:-?E?(\d{1,2}))?\b`)
+	reSeasonPack = regexp.MustCompile(`(?i)\bS(?:eason)?[ ._-]?(\d{1,2})\b`)
 	reEpNums     = regexp.MustCompile(`(?i)E(\d{1,2})`)
 	reYear       = regexp.MustCompile(`\b(19\d{2}|20\d{2})\b`)
 	reGroup      = regexp.MustCompile(`-(\w+)$`)
@@ -78,6 +79,9 @@ func Parse(title string, kind provider.MediaKind) ParsedRelease {
 					p.Episodes = append(p.Episodes, e)
 				}
 			}
+		} else if m := reSeasonPack.FindStringSubmatch(title); m != nil {
+			// Season pack: a season is named but no episode → whole-season release.
+			p.Season = atoi(m[1])
 		}
 	} else {
 		if m := reYear.FindString(title); m != "" {
