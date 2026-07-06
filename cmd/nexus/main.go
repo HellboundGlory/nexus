@@ -123,12 +123,17 @@ func run(ctx context.Context) error {
 	sch.Every(time.Duration(autoCfg.MissingSearchIntervalHours)*time.Hour, func() command.Command {
 		return automation.NewMissingSearchCommand(autoSvc)
 	})
+	if autoCfg.RSSSyncEnabled {
+		sch.Every(time.Duration(autoCfg.RSSSyncIntervalMinutes)*time.Minute, func() command.Command {
+			return automation.NewRSSSyncCommand(autoSvc)
+		})
+	}
 	sch.Start()
 
 	authSvc := auth.NewService(st, cfg.APIKey)
 	router := api.NewRouter(api.Deps{
 		Auth: authSvc, Store: st, Version: version.Version(), Bus: bus,
-		WSForward: []string{"indexer.status", "download.status", "media.series.updated", "media.movie.updated", "import.completed", "queue.updated", "automation.search.completed"},
+		WSForward: []string{"indexer.status", "download.status", "media.series.updated", "media.movie.updated", "import.completed", "queue.updated", "automation.search.completed", "automation.rss.completed"},
 	}, web.Handler(), idxAPI.Mount, dlAPI.Mount, mediaAPI.Mount, qualityAPI.Mount, importAPI.Mount, autoAPI.Mount)
 
 	srv := &http.Server{Addr: cfg.Addr(), Handler: router}

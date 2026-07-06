@@ -4,6 +4,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/hellboundg/nexus/internal/core/provider"
@@ -81,6 +82,16 @@ func parseReleases(data []byte, indexerID string, proto provider.Protocol) ([]pr
 			case "peers":
 				if n, err := strconv.Atoi(a.Value); err == nil {
 					peers = &n
+				}
+			case "tmdbid":
+				if n, err := strconv.Atoi(a.Value); err == nil {
+					r.TMDBID = n
+				}
+			case "imdbid":
+				r.IMDbID = strings.TrimPrefix(strings.ToLower(a.Value), "tt")
+			case "tvdbid":
+				if n, err := strconv.Atoi(a.Value); err == nil {
+					r.TVDBID = n
 				}
 			}
 		}

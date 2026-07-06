@@ -58,6 +58,11 @@ type Release struct {
 	Protocol    Protocol
 	Seeders     *int
 	Leechers    *int
+	// Identity ids from newznab/torznab attrs (0/"" when absent). IMDbID is stored
+	// without the "tt" prefix. Used by automation's RSS reverse-matcher.
+	TMDBID int
+	IMDbID string
+	TVDBID int
 }
 
 type DownloadStatus string

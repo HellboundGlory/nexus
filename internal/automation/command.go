@@ -58,3 +58,11 @@ func NewMissingSearchCommand(svc *Service) command.Command {
 		return svc.MissingSweep(ctx, cfg.MissingSearchBatchSize)
 	}}
 }
+
+// NewRSSSyncCommand is the scheduled RSS poll over all enabled indexers.
+func NewRSSSyncCommand(svc *Service) command.Command {
+	return &searchCommand{name: "RSSSync", run: func(ctx context.Context) (int, error) {
+		res, err := svc.RSSSync(ctx)
+		return res.Grabbed, err
+	}}
+}

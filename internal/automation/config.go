@@ -7,17 +7,24 @@ import (
 
 const configSettingKey = "automation.config"
 
-// Config controls the scheduled missing-item sweep. The interval is read at
-// startup to register the scheduler; a change takes effect on next startup.
+// Config controls the scheduled missing-item sweep and RSS sync. Intervals are
+// read at startup to register the scheduler; a change takes effect on next
+// startup.
 type Config struct {
-	MissingSearchIntervalHours int `json:"missingSearchIntervalHours"`
-	MissingSearchBatchSize     int `json:"missingSearchBatchSize"`
+	MissingSearchIntervalHours int  `json:"missingSearchIntervalHours"`
+	MissingSearchBatchSize     int  `json:"missingSearchBatchSize"`
+	RSSSyncEnabled             bool `json:"rssSyncEnabled"`
+	RSSSyncIntervalMinutes     int  `json:"rssSyncIntervalMinutes"`
 }
 
-// DefaultConfig is applied when no config has been saved. Deliberately
-// conservative because RSS sync (5b) does not exist yet.
+// DefaultConfig is applied when no config has been saved.
 func DefaultConfig() Config {
-	return Config{MissingSearchIntervalHours: 6, MissingSearchBatchSize: 100}
+	return Config{
+		MissingSearchIntervalHours: 6,
+		MissingSearchBatchSize:     100,
+		RSSSyncEnabled:             true,
+		RSSSyncIntervalMinutes:     15,
+	}
 }
 
 // Config returns the persisted config, or DefaultConfig if none is saved. Any
@@ -41,6 +48,9 @@ func (s *Service) Config(ctx context.Context) (Config, error) {
 	}
 	if c.MissingSearchBatchSize <= 0 {
 		c.MissingSearchBatchSize = d.MissingSearchBatchSize
+	}
+	if c.RSSSyncIntervalMinutes <= 0 {
+		c.RSSSyncIntervalMinutes = d.RSSSyncIntervalMinutes
 	}
 	return c, nil
 }
