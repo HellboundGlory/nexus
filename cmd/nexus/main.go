@@ -128,12 +128,17 @@ func run(ctx context.Context) error {
 			return automation.NewRSSSyncCommand(autoSvc)
 		})
 	}
+	if autoCfg.UpgradeSearchEnabled {
+		sch.Every(time.Duration(autoCfg.UpgradeSearchIntervalHours)*time.Hour, func() command.Command {
+			return automation.NewUpgradeSearchCommand(autoSvc)
+		})
+	}
 	sch.Start()
 
 	authSvc := auth.NewService(st, cfg.APIKey)
 	router := api.NewRouter(api.Deps{
 		Auth: authSvc, Store: st, Version: version.Version(), Bus: bus,
-		WSForward: []string{"indexer.status", "download.status", "media.series.updated", "media.movie.updated", "import.completed", "queue.updated", "automation.search.completed", "automation.rss.completed"},
+		WSForward: []string{"indexer.status", "download.status", "media.series.updated", "media.movie.updated", "import.completed", "queue.updated", "automation.search.completed", "automation.rss.completed", "automation.upgrade.completed"},
 	}, web.Handler(), idxAPI.Mount, dlAPI.Mount, mediaAPI.Mount, qualityAPI.Mount, importAPI.Mount, autoAPI.Mount)
 
 	srv := &http.Server{Addr: cfg.Addr(), Handler: router}

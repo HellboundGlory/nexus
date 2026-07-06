@@ -52,6 +52,31 @@ func TestRSSSyncCommandRuns(t *testing.T) {
 	}
 }
 
+func TestUpgradeSearchCommandRuns(t *testing.T) {
+	st := newStore(t)
+	id := seedMovie(t, st, true, true)
+	if _, err := st.UpsertMediaFile(context.Background(), store.MediaFile{
+		MediaKind: "movie", MovieID: &id, RelativePath: "m.mkv", QualityID: 7,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	fs := &fakeSearcher{releases: []provider.Release{
+		{Title: "The.Film.2020.1080p.BluRay.x264-GRP", DownloadURL: "blu", Protocol: provider.ProtocolUsenet},
+	}}
+	fe := &fakeEnqueuer{}
+	svc := NewService(st, fs, fe, nil)
+	cmd := NewUpgradeSearchCommand(svc)
+	if cmd.Name() != "UpgradeSearch" {
+		t.Fatalf("bad name %q", cmd.Name())
+	}
+	if err := cmd.Run(context.Background(), nopReporter{}); err != nil {
+		t.Fatal(err)
+	}
+	if len(fe.reqs) != 1 {
+		t.Fatalf("upgrade command should have grabbed one, got %d", len(fe.reqs))
+	}
+}
+
 func TestMissingSweepRespectsBatchAndSkipsFiled(t *testing.T) {
 	st := newStore(t)
 	ctx := context.Background()

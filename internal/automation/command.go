@@ -66,3 +66,15 @@ func NewRSSSyncCommand(svc *Service) command.Command {
 		return res.Grabbed, err
 	}}
 }
+
+// NewUpgradeSearchCommand is the scheduled upgrade / cutoff-unmet sweep over
+// monitored items whose existing file ranks below the profile cutoff.
+func NewUpgradeSearchCommand(svc *Service) command.Command {
+	return &searchCommand{name: "UpgradeSearch", run: func(ctx context.Context) (int, error) {
+		cfg, err := svc.Config(ctx)
+		if err != nil {
+			return 0, err
+		}
+		return svc.UpgradeSweep(ctx, cfg.UpgradeSearchBatchSize)
+	}}
+}
