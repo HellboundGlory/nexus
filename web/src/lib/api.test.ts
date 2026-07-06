@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest"
 import { apiGet, apiPost, ApiError, getStatus, setUnauthorizedHandler } from "@/lib/api"
 
 function mockFetch(status: number, body: unknown, contentType = "application/json") {
-  return vi.fn(async () =>
+  return vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
     new Response(body == null ? null : JSON.stringify(body), {
       status,
       headers: { "Content-Type": contentType },
@@ -43,7 +43,7 @@ describe("api client", () => {
 
   it("wraps a non-JSON error body", async () => {
     vi.stubGlobal("fetch", mockFetch(500, "boom", "text/plain"))
-    const err = await apiGet("/x").catch((e) => e)
+    const err = (await apiGet("/x").catch((e) => e)) as ApiError
     expect(err).toBeInstanceOf(ApiError)
     expect(err.status).toBe(500)
     expect(err.code).toBe("unknown")
