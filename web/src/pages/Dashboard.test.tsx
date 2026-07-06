@@ -50,4 +50,12 @@ describe("Dashboard", () => {
     renderDash()
     expect(await screen.findByText("import.completed")).toBeInTheDocument()
   })
+
+  it("shows a graceful error state when /system/status fails", async () => {
+    vi.mocked(api.getStatus).mockRejectedValue(new Error("boom"))
+    vi.mocked(activity.useActivity).mockReturnValue([])
+    renderDash()
+    expect(await screen.findByText("Unknown")).toBeInTheDocument()
+    expect(screen.getAllByText("—")).toHaveLength(2)
+  })
 })
