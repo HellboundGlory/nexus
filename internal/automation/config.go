@@ -7,9 +7,9 @@ import (
 
 const configSettingKey = "automation.config"
 
-// Config controls the scheduled missing-item sweep and RSS sync. Intervals are
-// read at startup to register the scheduler; a change takes effect on next
-// startup.
+// Config controls the scheduled missing-item sweep, RSS sync, and upgrade /
+// cutoff-unmet sweep. Intervals are read at startup to register the scheduler;
+// a change takes effect on next startup.
 type Config struct {
 	MissingSearchIntervalHours int  `json:"missingSearchIntervalHours"`
 	MissingSearchBatchSize     int  `json:"missingSearchBatchSize"`
