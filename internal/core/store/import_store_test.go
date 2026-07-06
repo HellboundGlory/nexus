@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/hellboundg/nexus/internal/core/database"
 )
@@ -118,5 +119,32 @@ func TestHistoryAppendAndList(t *testing.T) {
 	}
 	if list[0].SourceTitle != "B" { // newest first
 		t.Fatalf("expected newest first, got %q", list[0].SourceTitle)
+	}
+}
+
+func TestGrabbedSince(t *testing.T) {
+	st := newImportTestStore(t)
+	ctx := context.Background()
+	// movie_id/series_id left nil to avoid FK constraints; we only test the
+	// event_type + time filtering here.
+	if err := st.AddHistory(ctx, HistoryEvent{EventType: "grabbed", MediaKind: "movie", SourceTitle: "A"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.AddHistory(ctx, HistoryEvent{EventType: "imported", MediaKind: "movie", SourceTitle: "B"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.GrabbedSince(ctx, time.Now().Add(-time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].SourceTitle != "A" || got[0].EventType != "grabbed" {
+		t.Fatalf("want only the grabbed row A, got %+v", got)
+	}
+	future, err := st.GrabbedSince(ctx, time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(future) != 0 {
+		t.Fatalf("future since should return no rows, got %d", len(future))
 	}
 }
