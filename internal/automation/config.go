@@ -15,6 +15,10 @@ type Config struct {
 	MissingSearchBatchSize     int  `json:"missingSearchBatchSize"`
 	RSSSyncEnabled             bool `json:"rssSyncEnabled"`
 	RSSSyncIntervalMinutes     int  `json:"rssSyncIntervalMinutes"`
+	UpgradeSearchEnabled       bool `json:"upgradeSearchEnabled"`
+	UpgradeSearchIntervalHours int  `json:"upgradeSearchIntervalHours"`
+	UpgradeSearchBatchSize     int  `json:"upgradeSearchBatchSize"`
+	UpgradeGrabCooldownHours   int  `json:"upgradeGrabCooldownHours"`
 }
 
 // DefaultConfig is applied when no config has been saved.
@@ -24,6 +28,10 @@ func DefaultConfig() Config {
 		MissingSearchBatchSize:     100,
 		RSSSyncEnabled:             true,
 		RSSSyncIntervalMinutes:     15,
+		UpgradeSearchEnabled:       true,
+		UpgradeSearchIntervalHours: 12,
+		UpgradeSearchBatchSize:     100,
+		UpgradeGrabCooldownHours:   168,
 	}
 }
 
@@ -51,6 +59,15 @@ func (s *Service) Config(ctx context.Context) (Config, error) {
 	}
 	if c.RSSSyncIntervalMinutes <= 0 {
 		c.RSSSyncIntervalMinutes = d.RSSSyncIntervalMinutes
+	}
+	if c.UpgradeSearchIntervalHours <= 0 {
+		c.UpgradeSearchIntervalHours = d.UpgradeSearchIntervalHours
+	}
+	if c.UpgradeSearchBatchSize <= 0 {
+		c.UpgradeSearchBatchSize = d.UpgradeSearchBatchSize
+	}
+	if c.UpgradeGrabCooldownHours <= 0 {
+		c.UpgradeGrabCooldownHours = d.UpgradeGrabCooldownHours
 	}
 	return c, nil
 }
