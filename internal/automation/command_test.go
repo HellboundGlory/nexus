@@ -32,6 +32,26 @@ func TestSearchMovieCommandRuns(t *testing.T) {
 	}
 }
 
+func TestRSSSyncCommandRuns(t *testing.T) {
+	st := newStore(t)
+	seedMovie(t, st, true, true)
+	fs := &fakeSearcher{releases: []provider.Release{
+		{Title: "The.Film.2020.1080p.BluRay.x264-GRP", DownloadURL: "u", Protocol: provider.ProtocolUsenet, Categories: []int{2040}},
+	}}
+	fe := &fakeEnqueuer{}
+	svc := NewService(st, fs, fe, nil)
+	cmd := NewRSSSyncCommand(svc)
+	if cmd.Name() != "RSSSync" {
+		t.Fatalf("bad name %q", cmd.Name())
+	}
+	if err := cmd.Run(context.Background(), nopReporter{}); err != nil {
+		t.Fatal(err)
+	}
+	if len(fe.reqs) != 1 {
+		t.Fatalf("RSS command should have grabbed one, got %d", len(fe.reqs))
+	}
+}
+
 func TestMissingSweepRespectsBatchAndSkipsFiled(t *testing.T) {
 	st := newStore(t)
 	ctx := context.Background()
