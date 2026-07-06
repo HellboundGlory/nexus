@@ -43,3 +43,19 @@ func TestIsUpgrade(t *testing.T) {
 		t.Fatal("any allowed quality upgrades an unknown/absent existing quality")
 	}
 }
+
+func TestCutoffUnmet(t *testing.T) {
+	p := upProfile(true) // 7 < 9, cutoff 9, upgrades on
+	if !CutoffUnmet(7, p) {
+		t.Fatal("quality below cutoff should be cutoff-unmet")
+	}
+	if CutoffUnmet(9, p) {
+		t.Fatal("quality at cutoff should NOT be cutoff-unmet")
+	}
+	if CutoffUnmet(7, upProfile(false)) {
+		t.Fatal("upgrades disabled -> never cutoff-unmet")
+	}
+	if !CutoffUnmet(999, p) {
+		t.Fatal("quality absent from profile ranks below all -> cutoff-unmet")
+	}
+}

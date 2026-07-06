@@ -115,3 +115,17 @@ func IsUpgrade(newID, existingID int, profile store.QualityProfile) bool {
 	}
 	return newRank > existingRank
 }
+
+// CutoffUnmet reports whether an existing file of quality existingID is eligible
+// for an upgrade under the profile: upgrades enabled AND the existing quality
+// ranks strictly below the profile cutoff. It is IsUpgrade's cutoff arm made
+// available without a candidate, for use as a pre-search filter. Qualities absent
+// from the profile rank below all present ones (profileRank returns -1).
+func CutoffUnmet(existingID int, profile store.QualityProfile) bool {
+	if !profile.UpgradeAllowed {
+		return false
+	}
+	existingRank, _ := profileRank(profile, existingID)
+	cutoffRank, _ := profileRank(profile, profile.CutoffQualityID)
+	return existingRank < cutoffRank
+}
