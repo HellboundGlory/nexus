@@ -48,7 +48,7 @@ func (s *Service) searchMovie(ctx context.Context, movieID int64) (int, error) {
 		slog.Warn("automation: movie search had indexer errors", "movieId", m.ID, "err", err)
 	}
 	cands := Decide(releases, provider.KindMovie, profile)
-	grabbed, err := s.enqueueBest(ctx, cands, func(c Candidate) importing.EnqueueRequest {
+	_, grabbed, err := s.enqueueBest(ctx, cands, func(c Candidate) importing.EnqueueRequest {
 		return importing.EnqueueRequest{
 			DownloadURL: c.Release.DownloadURL, Title: c.Release.Title,
 			Protocol: c.Release.Protocol, IndexerID: c.Release.IndexerID,
@@ -114,20 +114,21 @@ func (s *Service) profileFor(ctx context.Context, profileID *int64) (store.Quali
 	return p, true, nil
 }
 
-// enqueueBest tries candidates best-first, returning true once one is grabbed.
-// A grab failure (network/reject) falls through to the next candidate;
-// importing.ErrNoProfile is terminal for the item (nothing more to try).
-func (s *Service) enqueueBest(ctx context.Context, cands []Candidate, req func(Candidate) importing.EnqueueRequest) (bool, error) {
+// enqueueBest tries candidates best-first, returning the grabbed candidate and
+// true once one is grabbed (zero Candidate and false otherwise). A grab failure
+// (network/reject) falls through to the next candidate; importing.ErrNoProfile
+// is terminal for the item (nothing more to try).
+func (s *Service) enqueueBest(ctx context.Context, cands []Candidate, req func(Candidate) importing.EnqueueRequest) (Candidate, bool, error) {
 	for _, c := range cands {
 		if _, err := s.enqueue.Enqueue(ctx, req(c)); err == nil {
-			return true, nil
+			return c, true, nil
 		} else if errors.Is(err, importing.ErrNoProfile) {
-			return false, nil
+			return Candidate{}, false, nil
 		} else {
 			slog.Warn("automation: enqueue failed, trying next candidate", "title", c.Release.Title, "err", err)
 		}
 	}
-	return false, nil
+	return Candidate{}, false, nil
 }
 
 // SearchSeries searches every monitored season of a monitored series for its
@@ -241,7 +242,7 @@ func (s *Service) searchSeason(ctx context.Context, se *store.Series, seasonNumb
 			}
 		}
 		ids := episodeIDs(missing)
-		grabbed, err := s.enqueueBest(ctx, packs, func(c Candidate) importing.EnqueueRequest {
+		_, grabbed, err := s.enqueueBest(ctx, packs, func(c Candidate) importing.EnqueueRequest {
 			return tvRequest(se.ID, ids, c)
 		})
 		if err != nil {
@@ -317,7 +318,7 @@ func (s *Service) searchEpisode(ctx context.Context, se *store.Series, e store.E
 			covering = append(covering, c)
 		}
 	}
-	grabbed, err := s.enqueueBest(ctx, covering, func(c Candidate) importing.EnqueueRequest {
+	_, grabbed, err := s.enqueueBest(ctx, covering, func(c Candidate) importing.EnqueueRequest {
 		return tvRequest(se.ID, []int64{e.ID}, c)
 	})
 	if err != nil {

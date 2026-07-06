@@ -91,6 +91,18 @@ func TestMatchSeriesByTitle(t *testing.T) {
 	}
 }
 
+func TestMatchSeriesBySeasonPackTitle(t *testing.T) {
+	idx := testIndex()
+	// Season-pack-only title, no episode group: p.Title from parsing.Parse still
+	// carries the bare season token ("The Show S01"), which must be stripped
+	// (after the un-stripped lookup misses) to resolve by title.
+	r := provider.Release{Title: "The.Show.S01.1080p.BluRay.x264-GRP"}
+	se, ok := idx.matchSeries(r, parsing.Parse(r.Title, provider.KindTV))
+	if !ok || se.ID != 10 {
+		t.Fatalf("season-pack title series match failed: ok=%v se=%v", ok, se)
+	}
+}
+
 func TestMatchSeriesAmbiguousDroppedWithoutYear(t *testing.T) {
 	idx := testIndex()
 	// Two "Clone" series, release title has no year → ambiguous → drop.
@@ -222,6 +234,43 @@ func TestRSSSyncSkipsFiledEpisode(t *testing.T) {
 	// Matched (it resolves to the series) but not grabbed (episode already filed).
 	if res.Grabbed != 0 || len(fe.reqs) != 0 {
 		t.Fatalf("already-filed episode must not be grabbed: res=%+v reqs=%d", res, len(fe.reqs))
+	}
+}
+
+func TestRSSSyncMultiEpisodeReleaseNotDoubleGrabbedInPartialSeason(t *testing.T) {
+	st := newStore(t)
+	// 3 monitored episodes; E01 already filed, E02+E03 missing.
+	_, epIDs := seedSeries(t, st, true, 3)
+	if _, err := st.UpsertMediaFile(context.Background(), store.MediaFile{
+		MediaKind: "tv", EpisodeID: &epIDs[0], RelativePath: "e1.mkv", QualityID: 9,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// A single multi-episode release covering E02+E03 (not a season pack, since
+	// E01 is already filed the season isn't fully missing, so the pack path is
+	// skipped and this release is only reachable via the per-episode loop).
+	fs := &fakeSearcher{releases: []provider.Release{
+		{Title: "The.Show.S01E02E03.1080p.BluRay.x264-GRP", DownloadURL: "e2e3", Protocol: provider.ProtocolUsenet, Categories: []int{5040}},
+	}}
+	fe := &fakeEnqueuer{}
+	svc := NewService(st, fs, fe, nil)
+
+	res, err := svc.RSSSync(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fe.reqs) != 1 {
+		t.Fatalf("multi-episode release must be grabbed exactly once, got %d reqs: %+v", len(fe.reqs), fe.reqs)
+	}
+	if res.Grabbed != 1 {
+		t.Fatalf("want Grabbed=1, got %+v", res)
+	}
+	got := map[int64]bool{}
+	for _, id := range fe.reqs[0].EpisodeIDs {
+		got[id] = true
+	}
+	if !got[epIDs[1]] || !got[epIDs[2]] {
+		t.Fatalf("single grab should cover both E02 and E03, got EpisodeIDs=%v", fe.reqs[0].EpisodeIDs)
 	}
 }
 

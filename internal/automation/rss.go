@@ -146,11 +146,21 @@ func (idx *libraryIndex) matchSeries(r provider.Release, p parsing.ParsedRelease
 	// bare season token (cleanTitle only cuts at a full S##E## season+episode
 	// marker for TV, so a season-pack-only title like "The.Show.S01..." has no
 	// episode group to cut at), e.g. "Clone.2015.S01E01..." -> "Clone 2015", or
-	// "The.Show.S01..." -> "The Show S01". Strip both before the title lookup so
-	// it matches the index key built from the stored series title.
-	cleaned := reTitleYear.ReplaceAllString(p.Title, " ")
-	cleaned = reSeasonTok.ReplaceAllString(cleaned, " ")
-	cands := idx.seriesByTitle[normTitle(cleaned)]
+	// "The.Show.S01..." -> "The Show S01".
+	//
+	// The index key is built from the stored series title, un-stripped. Try the
+	// un-stripped release title first so a series literally titled with a year
+	// or season-like token (e.g. "1923") still matches its own un-stripped key,
+	// and so a normal series isn't narrowed by a coincidental "year" in the
+	// release title (e.g. "Foo.2019.S01E01" must not miss "Foo" via a stripped
+	// key when nothing forces the strip). Only fall back to the year+season-
+	// stripped key when the un-stripped lookup yields nothing.
+	cands := idx.seriesByTitle[normTitle(p.Title)]
+	if len(cands) == 0 {
+		cleaned := reTitleYear.ReplaceAllString(p.Title, " ")
+		cleaned = reSeasonTok.ReplaceAllString(cleaned, " ")
+		cands = idx.seriesByTitle[normTitle(cleaned)]
+	}
 	if len(cands) == 1 {
 		return cands[0], true
 	}
@@ -286,7 +296,7 @@ func (s *Service) RSSSync(ctx context.Context) (RSSResult, error) {
 			continue
 		}
 		cands := Decide(rels, provider.KindMovie, profile)
-		grabbed, err := s.enqueueBest(ctx, cands, func(c Candidate) importing.EnqueueRequest {
+		_, grabbed, err := s.enqueueBest(ctx, cands, func(c Candidate) importing.EnqueueRequest {
 			return importing.EnqueueRequest{
 				DownloadURL: c.Release.DownloadURL, Title: c.Release.Title,
 				Protocol: c.Release.Protocol, IndexerID: c.Release.IndexerID,
@@ -367,7 +377,7 @@ func (s *Service) rssPlaceTV(ctx context.Context, se *store.Series, eps []store.
 			continue
 		}
 		ids := episodeIDs(missing)
-		ok, err := s.enqueueBest(ctx, packs, func(c Candidate) importing.EnqueueRequest {
+		_, ok, err := s.enqueueBest(ctx, packs, func(c Candidate) importing.EnqueueRequest {
 			return tvRequest(se.ID, ids, c)
 		})
 		if err != nil {
@@ -396,15 +406,33 @@ func (s *Service) rssPlaceTV(ctx context.Context, se *store.Series, eps []store.
 			if len(covering) == 0 {
 				continue
 			}
-			ok, err := s.enqueueBest(ctx, covering, func(c Candidate) importing.EnqueueRequest {
-				return tvRequest(se.ID, []int64{e.ID}, c)
+			// A covering candidate may be a multi-episode release (e.g.
+			// S01E02E03) that also covers other still-missing episodes in this
+			// season. Compute the full set of missing episodes the chosen
+			// candidate covers so a single grab enqueues all of them together
+			// and marks them all handled — otherwise the next missing episode
+			// in this loop would find the same release still in `covering`
+			// (activeEps is a poll-start snapshot, not updated mid-poll) and
+			// grab it again, producing a duplicate download.
+			chosen, ok, err := s.enqueueBest(ctx, covering, func(c Candidate) importing.EnqueueRequest {
+				var ids []int64
+				for _, m := range missing {
+					if containsInt(c.Parsed.Episodes, m.EpisodeNumber) {
+						ids = append(ids, m.ID)
+					}
+				}
+				return tvRequest(se.ID, ids, c)
 			})
 			if err != nil {
 				return grabbed, err
 			}
 			if ok {
 				grabbed++
-				handled[e.ID] = struct{}{}
+				for _, m := range missing {
+					if containsInt(chosen.Parsed.Episodes, m.EpisodeNumber) {
+						handled[m.ID] = struct{}{}
+					}
+				}
 			}
 		}
 	}
