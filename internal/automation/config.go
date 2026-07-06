@@ -7,14 +7,18 @@ import (
 
 const configSettingKey = "automation.config"
 
-// Config controls the scheduled missing-item sweep and RSS sync. Intervals are
-// read at startup to register the scheduler; a change takes effect on next
-// startup.
+// Config controls the scheduled missing-item sweep, RSS sync, and upgrade /
+// cutoff-unmet sweep. Intervals are read at startup to register the scheduler;
+// a change takes effect on next startup.
 type Config struct {
 	MissingSearchIntervalHours int  `json:"missingSearchIntervalHours"`
 	MissingSearchBatchSize     int  `json:"missingSearchBatchSize"`
 	RSSSyncEnabled             bool `json:"rssSyncEnabled"`
 	RSSSyncIntervalMinutes     int  `json:"rssSyncIntervalMinutes"`
+	UpgradeSearchEnabled       bool `json:"upgradeSearchEnabled"`
+	UpgradeSearchIntervalHours int  `json:"upgradeSearchIntervalHours"`
+	UpgradeSearchBatchSize     int  `json:"upgradeSearchBatchSize"`
+	UpgradeGrabCooldownHours   int  `json:"upgradeGrabCooldownHours"`
 }
 
 // DefaultConfig is applied when no config has been saved.
@@ -24,6 +28,10 @@ func DefaultConfig() Config {
 		MissingSearchBatchSize:     100,
 		RSSSyncEnabled:             true,
 		RSSSyncIntervalMinutes:     15,
+		UpgradeSearchEnabled:       true,
+		UpgradeSearchIntervalHours: 12,
+		UpgradeSearchBatchSize:     100,
+		UpgradeGrabCooldownHours:   168,
 	}
 }
 
@@ -51,6 +59,15 @@ func (s *Service) Config(ctx context.Context) (Config, error) {
 	}
 	if c.RSSSyncIntervalMinutes <= 0 {
 		c.RSSSyncIntervalMinutes = d.RSSSyncIntervalMinutes
+	}
+	if c.UpgradeSearchIntervalHours <= 0 {
+		c.UpgradeSearchIntervalHours = d.UpgradeSearchIntervalHours
+	}
+	if c.UpgradeSearchBatchSize <= 0 {
+		c.UpgradeSearchBatchSize = d.UpgradeSearchBatchSize
+	}
+	if c.UpgradeGrabCooldownHours <= 0 {
+		c.UpgradeGrabCooldownHours = d.UpgradeGrabCooldownHours
 	}
 	return c, nil
 }

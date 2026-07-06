@@ -48,6 +48,10 @@ func TestConfigRoundTrip(t *testing.T) {
 	}
 	want.RSSSyncEnabled = false
 	want.RSSSyncIntervalMinutes = 15
+	want.UpgradeSearchIntervalHours = 12
+	want.UpgradeSearchBatchSize = 100
+	want.UpgradeGrabCooldownHours = 168
+	// UpgradeSearchEnabled stays false (persisted zero value, bool not clamped)
 	if got != want {
 		t.Fatalf("want %+v, got %+v", want, got)
 	}
@@ -95,6 +99,7 @@ func TestConfigRSSRoundTrip(t *testing.T) {
 	want := Config{
 		MissingSearchIntervalHours: 6, MissingSearchBatchSize: 100,
 		RSSSyncEnabled: true, RSSSyncIntervalMinutes: 30,
+		UpgradeSearchIntervalHours: 12, UpgradeSearchBatchSize: 100, UpgradeGrabCooldownHours: 168,
 	}
 	if err := svc.SetConfig(ctx, want); err != nil {
 		t.Fatal(err)
@@ -105,5 +110,42 @@ func TestConfigRSSRoundTrip(t *testing.T) {
 	}
 	if got != want {
 		t.Fatalf("want %+v, got %+v", want, got)
+	}
+}
+
+func TestConfigUpgradeDefaults(t *testing.T) {
+	svc := NewService(newStore(t), nil, nil, nil)
+	got, err := svc.Config(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.UpgradeSearchEnabled {
+		t.Fatal("upgrade search should default enabled")
+	}
+	if got.UpgradeSearchIntervalHours != 12 || got.UpgradeSearchBatchSize != 100 || got.UpgradeGrabCooldownHours != 168 {
+		t.Fatalf("unexpected upgrade defaults: %+v", got)
+	}
+}
+
+func TestConfigUpgradeClamps(t *testing.T) {
+	svc := NewService(newStore(t), nil, nil, nil)
+	ctx := context.Background()
+	if err := svc.SetConfig(ctx, Config{
+		MissingSearchIntervalHours: 6, MissingSearchBatchSize: 100,
+		RSSSyncEnabled: true, RSSSyncIntervalMinutes: 15,
+		UpgradeSearchEnabled: false, UpgradeSearchIntervalHours: 0,
+		UpgradeSearchBatchSize: 0, UpgradeGrabCooldownHours: 0,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := svc.Config(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.UpgradeSearchIntervalHours != 12 || got.UpgradeSearchBatchSize != 100 || got.UpgradeGrabCooldownHours != 168 {
+		t.Fatalf("non-positive upgrade ints should clamp to defaults, got %+v", got)
+	}
+	if got.UpgradeSearchEnabled {
+		t.Fatal("explicit UpgradeSearchEnabled=false must be respected")
 	}
 }

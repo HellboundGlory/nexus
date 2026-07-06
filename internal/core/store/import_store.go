@@ -255,3 +255,31 @@ func (s *Store) ListHistory(ctx context.Context, limit int) ([]HistoryEvent, err
 	}
 	return out, rows.Err()
 }
+
+// sqliteTimeLayout matches SQLite's CURRENT_TIMESTAMP text format so a bound
+// time compares correctly (lexicographically == chronologically) against
+// created_at values written by the DB default.
+const sqliteTimeLayout = "2006-01-02 15:04:05"
+
+// GrabbedSince returns "grabbed" history events created at or after since,
+// newest first. Used by the automation upgrade sweep to build its cooldown guard.
+func (s *Store) GrabbedSince(ctx context.Context, since time.Time) ([]HistoryEvent, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, event_type, media_kind, series_id, episode_id, movie_id, source_title, quality_id, message, created_at
+		 FROM history WHERE event_type = 'grabbed' AND created_at >= ? ORDER BY id DESC`,
+		since.UTC().Format(sqliteTimeLayout))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []HistoryEvent
+	for rows.Next() {
+		var h HistoryEvent
+		if err := rows.Scan(&h.ID, &h.EventType, &h.MediaKind, &h.SeriesID, &h.EpisodeID, &h.MovieID,
+			&h.SourceTitle, &h.QualityID, &h.Message, &h.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, h)
+	}
+	return out, rows.Err()
+}

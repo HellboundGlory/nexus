@@ -270,4 +270,15 @@ cross-package edges; verified post-build via direct-imports as with 5a/5b.
 - RSS-driven upgrades (would require 5b's matcher to also consider owned
   below-cutoff items).
 - 5a's latent missing-sweep re-grab hole (benign; noted for completeness).
-- 5a's `searchSeason` multi-episode double-grab (pre-existing, tracked from 5b).
+- Multi-episode double-grab within a single sweep (same inherited class as 5a's
+  `searchSeason`, which shipped accepted): the cooldown set is built once at sweep
+  start, so two below-cutoff episodes of one series both covered by a single
+  multi-episode release can each grab it (one queue row per episode) before either
+  history row is written. TV-only (movies are visited once per sweep) and
+  self-heals across sweeps (the first grab's `"grabbed"` history row keyed on
+  `(series, title)` closes the others next sweep). Optional one-line hardening:
+  after a successful grab in `upgradeEpisode`, insert
+  `cooldownKey{seriesKey(se.ID), normTitle(c.Release.Title)}` into the in-memory
+  `cs` so later episodes in the same sweep see it. Deferred to keep 5c consistent
+  with 5a's shipped bar; both 5a's `searchSeason` and this 5c instance to be
+  closed together in a future touch.
