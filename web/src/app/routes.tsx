@@ -1,0 +1,27 @@
+import { createBrowserRouter } from "react-router-dom"
+import { RequireAuth } from "@/lib/auth"
+import { Layout } from "@/app/Layout"
+import { Login } from "@/pages/Login"
+import { Placeholder } from "@/pages/Placeholder"
+// TODO(Task 7): swap to <Dashboard /> once @/pages/Dashboard exists
+
+export const router = createBrowserRouter([
+  { path: "/login", element: <Login /> },
+  {
+    path: "/",
+    element: (
+      <RequireAuth>
+        <Layout />
+      </RequireAuth>
+    ),
+    children: [
+      { index: true, element: <Placeholder title="Dashboard" /> },
+      { path: "movies", element: <Placeholder title="Movies" /> },
+      { path: "tv", element: <Placeholder title="TV Shows" /> },
+      { path: "calendar", element: <Placeholder title="Calendar" /> },
+      { path: "activity", element: <Placeholder title="Activity" /> },
+      { path: "settings", element: <Placeholder title="Settings" /> },
+      { path: "system", element: <Placeholder title="System" /> },
+    ],
+  },
+])
