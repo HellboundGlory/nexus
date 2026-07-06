@@ -22,3 +22,6 @@ web/dist/*
 
 # Claude Code local worktrees
 .claude/worktrees/
+
+# Brainstorming visual companion scratch
+.superpowers/
