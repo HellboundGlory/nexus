@@ -3,7 +3,7 @@ import { RequireAuth } from "@/lib/auth"
 import { Layout } from "@/app/Layout"
 import { Login } from "@/pages/Login"
 import { Placeholder } from "@/pages/Placeholder"
-// TODO(Task 7): swap to <Dashboard /> once @/pages/Dashboard exists
+import { Dashboard } from "@/pages/Dashboard"
 
 export const router = createBrowserRouter([
   { path: "/login", element: <Login /> },
@@ -15,7 +15,7 @@ export const router = createBrowserRouter([
       </RequireAuth>
     ),
     children: [
-      { index: true, element: <Placeholder title="Dashboard" /> },
+      { index: true, element: <Dashboard /> },
       { path: "movies", element: <Placeholder title="Movies" /> },
       { path: "tv", element: <Placeholder title="TV Shows" /> },
       { path: "calendar", element: <Placeholder title="Calendar" /> },
