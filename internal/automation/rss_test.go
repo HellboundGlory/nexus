@@ -1,6 +1,7 @@
 package automation
 
 import (
+	"context"
 	"testing"
 
 	"github.com/hellboundg/nexus/internal/core/provider"
@@ -127,5 +128,125 @@ func TestRouteKind(t *testing.T) {
 		if ok != c.ok || k != c.kind {
 			t.Errorf("%s: routeKind = (%q,%v), want (%q,%v)", c.name, k, ok, c.kind, c.ok)
 		}
+	}
+}
+
+func TestRSSSyncMatchesMovieAndGrabs(t *testing.T) {
+	st := newStore(t)
+	id := seedMovie(t, st, true, true) // "The Film" (2020), tmdb 42, monitored, HD profile
+	fs := &fakeSearcher{releases: []provider.Release{
+		{Title: "The.Film.2020.1080p.BluRay.x264-GRP", DownloadURL: "u", Protocol: provider.ProtocolUsenet, Categories: []int{2040}},
+		{Title: "Unrelated.Thing.2019.1080p.WEB-DL-GRP", DownloadURL: "x", Protocol: provider.ProtocolUsenet, Categories: []int{2040}},
+	}}
+	fe := &fakeEnqueuer{}
+	svc := NewService(st, fs, fe, nil)
+
+	res, err := svc.RSSSync(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Considered != 2 || res.Matched != 1 || res.Grabbed != 1 {
+		t.Fatalf("counts = %+v, want considered=2 matched=1 grabbed=1", res)
+	}
+	if len(fe.reqs) != 1 || fe.reqs[0].MovieID != id || fe.reqs[0].DownloadURL != "u" {
+		t.Fatalf("bad enqueue: %+v", fe.reqs)
+	}
+	if fs.lastQuery.Type != provider.SearchGeneric {
+		t.Fatalf("RSS must use a generic empty-term query, got %+v", fs.lastQuery)
+	}
+}
+
+func TestRSSSyncPicksBestOfDuplicates(t *testing.T) {
+	st := newStore(t)
+	seedSeries(t, st, true, 1) // "The Show", 1 monitored episode S01E01
+	fs := &fakeSearcher{releases: []provider.Release{
+		{Title: "The.Show.S01E01.1080p.WEB-DL.x264-GRP", DownloadURL: "web", Protocol: provider.ProtocolUsenet, Categories: []int{5040}},
+		{Title: "The.Show.S01E01.1080p.BluRay.x264-GRP", DownloadURL: "blu", Protocol: provider.ProtocolUsenet, Categories: []int{5040}},
+	}}
+	fe := &fakeEnqueuer{}
+	svc := NewService(st, fs, fe, nil)
+
+	res, err := svc.RSSSync(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Grabbed != 1 || len(fe.reqs) != 1 {
+		t.Fatalf("two dupes should yield one grab: res=%+v reqs=%d", res, len(fe.reqs))
+	}
+	if fe.reqs[0].DownloadURL != "blu" {
+		t.Fatalf("best (Bluray) should be chosen, got %q", fe.reqs[0].DownloadURL)
+	}
+}
+
+func TestRSSSyncPrefersSeasonPack(t *testing.T) {
+	st := newStore(t)
+	sid, _ := seedSeries(t, st, true, 3) // 3 monitored missing episodes → fully missing
+	fs := &fakeSearcher{releases: []provider.Release{
+		{Title: "The.Show.S01E01.1080p.BluRay.x264-GRP", DownloadURL: "single", Protocol: provider.ProtocolUsenet, Categories: []int{5040}},
+		{Title: "The.Show.S01.1080p.BluRay.x264-GRP", DownloadURL: "pack", Protocol: provider.ProtocolUsenet, Categories: []int{5040}},
+	}}
+	fe := &fakeEnqueuer{}
+	svc := NewService(st, fs, fe, nil)
+
+	res, err := svc.RSSSync(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Grabbed != 1 || len(fe.reqs) != 1 || fe.reqs[0].DownloadURL != "pack" {
+		t.Fatalf("fully-missing season should grab the pack once: res=%+v reqs=%+v", res, fe.reqs)
+	}
+	if len(fe.reqs[0].EpisodeIDs) != 3 {
+		t.Fatalf("pack should carry all 3 missing episode ids, got %v", fe.reqs[0].EpisodeIDs)
+	}
+	_ = sid
+}
+
+func TestRSSSyncSkipsFiledEpisode(t *testing.T) {
+	st := newStore(t)
+	_, epIDs := seedSeries(t, st, true, 1)
+	if _, err := st.UpsertMediaFile(context.Background(), store.MediaFile{
+		MediaKind: "tv", EpisodeID: &epIDs[0], RelativePath: "e1.mkv", QualityID: 9,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	fs := &fakeSearcher{releases: []provider.Release{
+		{Title: "The.Show.S01E01.1080p.BluRay.x264-GRP", DownloadURL: "e1", Protocol: provider.ProtocolUsenet, Categories: []int{5040}},
+	}}
+	fe := &fakeEnqueuer{}
+	svc := NewService(st, fs, fe, nil)
+
+	res, err := svc.RSSSync(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Matched (it resolves to the series) but not grabbed (episode already filed).
+	if res.Grabbed != 0 || len(fe.reqs) != 0 {
+		t.Fatalf("already-filed episode must not be grabbed: res=%+v reqs=%d", res, len(fe.reqs))
+	}
+}
+
+func TestRSSSyncSkipsInFlightEpisode(t *testing.T) {
+	st := newStore(t)
+	ctx := context.Background()
+	sid, epIDs := seedSeries(t, st, true, 1)
+	// Pre-existing in-flight grab for that episode.
+	if _, err := st.EnqueueGrab(ctx, store.QueueItem{
+		SeriesID: &sid, MediaKind: "tv", EpisodeIDs: []int64{epIDs[0]},
+		SourceTitle: "prev", Protocol: "usenet", QualityID: 9, Status: store.QueueGrabbed,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	fs := &fakeSearcher{releases: []provider.Release{
+		{Title: "The.Show.S01E01.1080p.BluRay.x264-GRP", DownloadURL: "e1", Protocol: provider.ProtocolUsenet, Categories: []int{5040}},
+	}}
+	fe := &fakeEnqueuer{}
+	svc := NewService(st, fs, fe, nil)
+
+	res, err := svc.RSSSync(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Grabbed != 0 || len(fe.reqs) != 0 {
+		t.Fatalf("in-flight episode must not be re-grabbed: res=%+v reqs=%d", res, len(fe.reqs))
 	}
 }

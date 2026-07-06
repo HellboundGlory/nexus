@@ -1,17 +1,21 @@
 package automation
 
 import (
+	"context"
+	"log/slog"
 	"regexp"
 	"strings"
 
 	"github.com/hellboundg/nexus/internal/core/provider"
 	"github.com/hellboundg/nexus/internal/core/store"
+	"github.com/hellboundg/nexus/internal/importing"
 	"github.com/hellboundg/nexus/internal/parsing"
 )
 
 var (
 	reNonAlnum  = regexp.MustCompile(`[^a-z0-9]+`)
 	reTitleYear = regexp.MustCompile(`\b(19\d{2}|20\d{2})\b`)
+	reSeasonTok = regexp.MustCompile(`(?i)\bS\d{1,2}\b`)
 )
 
 // normTitle lowercases a title and collapses every run of non-alphanumeric
@@ -138,11 +142,15 @@ func (idx *libraryIndex) matchSeries(r provider.Release, p parsing.ParsedRelease
 			return se, true
 		}
 	}
-	// p.Title from parsing.Parse(_, KindTV) can still carry a bare year token
-	// (cleanTitle only cuts at resolution/source/season-episode markers for TV),
-	// e.g. "Clone.2015.S01E01..." -> p.Title == "Clone 2015". Strip it before the
-	// title lookup so it matches the index key built from the stored series title.
-	cands := idx.seriesByTitle[normTitle(reTitleYear.ReplaceAllString(p.Title, " "))]
+	// p.Title from parsing.Parse(_, KindTV) can still carry a bare year token or a
+	// bare season token (cleanTitle only cuts at a full S##E## season+episode
+	// marker for TV, so a season-pack-only title like "The.Show.S01..." has no
+	// episode group to cut at), e.g. "Clone.2015.S01E01..." -> "Clone 2015", or
+	// "The.Show.S01..." -> "The Show S01". Strip both before the title lookup so
+	// it matches the index key built from the stored series title.
+	cleaned := reTitleYear.ReplaceAllString(p.Title, " ")
+	cleaned = reSeasonTok.ReplaceAllString(cleaned, " ")
+	cands := idx.seriesByTitle[normTitle(cleaned)]
 	if len(cands) == 1 {
 		return cands[0], true
 	}
@@ -181,4 +189,224 @@ func routeKind(r provider.Release) (provider.MediaKind, bool) {
 		return provider.KindMovie, true
 	}
 	return "", false
+}
+
+// rssFeedLimit bounds each indexer's latest-feed response.
+const rssFeedLimit = 100
+
+// RSSResult summarizes one poll: releases seen, releases matched to a monitored
+// item, and releases grabbed.
+type RSSResult struct {
+	Considered int
+	Matched    int
+	Grabbed    int
+}
+
+// RSSCompleted is emitted when an RSS poll finishes → WS.
+type RSSCompleted struct {
+	Considered int `json:"considered"`
+	Matched    int `json:"matched"`
+	Grabbed    int `json:"grabbed"`
+}
+
+func (RSSCompleted) Name() string { return "automation.rss.completed" }
+
+// RSSSync polls every enabled indexer's latest feed once, reverse-matches each
+// release to a monitored missing item, and grabs the best acceptable release per
+// target. Release-driven, but grabs are decided per target (best-of-duplicates),
+// reusing the same guards and Decide/enqueueBest as the wanted/missing search.
+func (s *Service) RSSSync(ctx context.Context) (RSSResult, error) {
+	releases, err := s.search.Search(ctx, provider.Query{Type: provider.SearchGeneric, Limit: rssFeedLimit})
+	if err != nil {
+		slog.Warn("automation: rss feed had indexer errors", "err", err)
+	}
+	res := RSSResult{Considered: len(releases)}
+
+	movies, err := s.store.ListMovies(ctx)
+	if err != nil {
+		return res, err
+	}
+	series, err := s.store.ListSeries(ctx)
+	if err != nil {
+		return res, err
+	}
+	idx := buildLibraryIndex(movies, series)
+
+	// Bucket releases by resolved target.
+	movieRels := map[int64][]provider.Release{}
+	movieTargets := map[int64]*store.Movie{}
+	tvRels := map[int64][]provider.Release{}
+	tvTargets := map[int64]*store.Series{}
+	for _, r := range releases {
+		kind, ok := routeKind(r)
+		if !ok {
+			continue
+		}
+		p := parsing.Parse(r.Title, kind)
+		if kind == provider.KindMovie {
+			m, ok := idx.matchMovie(r, p)
+			if !ok {
+				continue
+			}
+			movieRels[m.ID] = append(movieRels[m.ID], r)
+			movieTargets[m.ID] = m
+			res.Matched++
+		} else {
+			se, ok := idx.matchSeries(r, p)
+			if !ok {
+				continue
+			}
+			tvRels[se.ID] = append(tvRels[se.ID], r)
+			tvTargets[se.ID] = se
+			res.Matched++
+		}
+	}
+
+	activeMovies, activeEps, err := s.activeQueue(ctx)
+	if err != nil {
+		return res, err
+	}
+
+	// Movies: skip filed/in-flight, then Decide + enqueue best of the bucket.
+	for movieID, rels := range movieRels {
+		if _, active := activeMovies[movieID]; active {
+			continue
+		}
+		if f, err := s.store.MediaFileForMovie(ctx, movieID); err != nil {
+			return res, err
+		} else if f != nil {
+			continue
+		}
+		m := movieTargets[movieID]
+		profile, ok, err := s.profileFor(ctx, m.QualityProfileID)
+		if err != nil {
+			return res, err
+		}
+		if !ok {
+			continue
+		}
+		cands := Decide(rels, provider.KindMovie, profile)
+		grabbed, err := s.enqueueBest(ctx, cands, func(c Candidate) importing.EnqueueRequest {
+			return importing.EnqueueRequest{
+				DownloadURL: c.Release.DownloadURL, Title: c.Release.Title,
+				Protocol: c.Release.Protocol, IndexerID: c.Release.IndexerID,
+				MediaKind: provider.KindMovie, MovieID: movieID,
+			}
+		})
+		if err != nil {
+			return res, err
+		}
+		if grabbed {
+			res.Grabbed++
+		}
+	}
+
+	// TV: per series, rank the bucket once, then place season packs / episodes.
+	for seriesID, rels := range tvRels {
+		se := tvTargets[seriesID]
+		profile, ok, err := s.profileFor(ctx, se.QualityProfileID)
+		if err != nil {
+			return res, err
+		}
+		if !ok {
+			continue
+		}
+		eps, err := s.store.ListEpisodes(ctx, seriesID)
+		if err != nil {
+			return res, err
+		}
+		ranked := Decide(rels, provider.KindTV, profile)
+		n, err := s.rssPlaceTV(ctx, se, eps, ranked, activeEps)
+		if err != nil {
+			return res, err
+		}
+		res.Grabbed += n
+	}
+
+	s.emit(ctx, RSSCompleted(res))
+	return res, nil
+}
+
+// rssPlaceTV places ranked TV candidates against a series' monitored-missing
+// episodes: a full-season pack first for any fully-missing monitored season
+// (grabbed with all its missing episode ids), then per-episode for any still-
+// unhandled missing episode. Mirrors the wanted/missing season strategy but over
+// an already-fetched candidate pool.
+func (s *Service) rssPlaceTV(ctx context.Context, se *store.Series, eps []store.Episode, ranked []Candidate, activeEps map[int64]struct{}) (int, error) {
+	missingBySeason := map[int][]store.Episode{}
+	monitoredBySeason := map[int]int{}
+	for _, e := range eps {
+		if !e.Monitored {
+			continue
+		}
+		monitoredBySeason[e.SeasonNumber]++
+		f, err := s.store.MediaFileForEpisode(ctx, e.ID)
+		if err != nil {
+			return 0, err
+		}
+		if _, active := activeEps[e.ID]; f == nil && !active {
+			missingBySeason[e.SeasonNumber] = append(missingBySeason[e.SeasonNumber], e)
+		}
+	}
+
+	handled := map[int64]struct{}{}
+	grabbed := 0
+
+	// Season packs first, for fully-missing monitored seasons.
+	for season, missing := range missingBySeason {
+		if len(missing) != monitoredBySeason[season] {
+			continue
+		}
+		var packs []Candidate
+		for _, c := range ranked {
+			if c.Parsed.Season == season && len(c.Parsed.Episodes) == 0 {
+				packs = append(packs, c)
+			}
+		}
+		if len(packs) == 0 {
+			continue
+		}
+		ids := episodeIDs(missing)
+		ok, err := s.enqueueBest(ctx, packs, func(c Candidate) importing.EnqueueRequest {
+			return tvRequest(se.ID, ids, c)
+		})
+		if err != nil {
+			return grabbed, err
+		}
+		if ok {
+			grabbed++
+			for _, e := range missing {
+				handled[e.ID] = struct{}{}
+			}
+		}
+	}
+
+	// Per-episode for anything not covered by a grabbed pack.
+	for season, missing := range missingBySeason {
+		for _, e := range missing {
+			if _, done := handled[e.ID]; done {
+				continue
+			}
+			var covering []Candidate
+			for _, c := range ranked {
+				if c.Parsed.Season == season && containsInt(c.Parsed.Episodes, e.EpisodeNumber) {
+					covering = append(covering, c)
+				}
+			}
+			if len(covering) == 0 {
+				continue
+			}
+			ok, err := s.enqueueBest(ctx, covering, func(c Candidate) importing.EnqueueRequest {
+				return tvRequest(se.ID, []int64{e.ID}, c)
+			})
+			if err != nil {
+				return grabbed, err
+			}
+			if ok {
+				grabbed++
+				handled[e.ID] = struct{}{}
+			}
+		}
+	}
+	return grabbed, nil
 }
