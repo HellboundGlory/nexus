@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest"
-import { apiGet, apiPost, ApiError, getStatus, setUnauthorizedHandler } from "@/lib/api"
+import { apiGet, apiPost, apiPut, apiDelete, ApiError, getStatus, login, setUnauthorizedHandler } from "@/lib/api"
 
 function mockFetch(status: number, body: unknown, contentType = "application/json") {
   return vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
@@ -55,5 +55,39 @@ describe("api client", () => {
     setUnauthorizedHandler(onUnauth)
     await expect(getStatus()).rejects.toBeInstanceOf(ApiError)
     expect(onUnauth).toHaveBeenCalledOnce()
+  })
+
+  it("apiPut sends a PUT with JSON body", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "Content-Type": "application/json" } }),
+    )
+    vi.stubGlobal("fetch", fetchMock)
+    await apiPut("/series/1/monitor", { monitored: true })
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/series/1/monitor",
+      expect.objectContaining({ method: "PUT", credentials: "include" }),
+    )
+  })
+
+  it("apiDelete sends a DELETE", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 200 }))
+    vi.stubGlobal("fetch", fetchMock)
+    await apiDelete("/movies/1")
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/movies/1",
+      expect.objectContaining({ method: "DELETE" }),
+    )
+  })
+
+  it("does not fire the unauthorized handler on a login 401", async () => {
+    const handler = vi.fn()
+    setUnauthorizedHandler(handler)
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: { code: "unauthorized", message: "bad" } }), { status: 401 }),
+    )
+    vi.stubGlobal("fetch", fetchMock)
+    await expect(login("admin", "wrong")).rejects.toBeInstanceOf(ApiError)
+    expect(handler).not.toHaveBeenCalled()
+    setUnauthorizedHandler(null)
   })
 })
