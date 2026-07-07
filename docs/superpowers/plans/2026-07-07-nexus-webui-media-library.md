@@ -820,6 +820,7 @@ export type MediaKind = "movie" | "tv"
 
 ```ts
 import { describe, it, expect, vi, beforeEach } from "vitest"
+import type { ReactNode } from "react"
 import { renderHook, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import * as apiClient from "@/lib/api"
@@ -832,7 +833,7 @@ vi.mock("@/lib/api", async (orig) => {
 
 function wrapper() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return function Wrapper({ children }: { children: React.ReactNode }) {
+  return function Wrapper({ children }: { children: ReactNode }) {
     return <QueryClientProvider client={qc}>{children}</QueryClientProvider>
   }
 }
@@ -1358,11 +1359,13 @@ export function Movies() {
           />
         )}
       />
-      <AddMediaDialog kind="movie" open={addOpen} onOpenChange={setAddOpen} />
+      {addOpen && <AddMediaDialog kind="movie" open={addOpen} onOpenChange={setAddOpen} />}
     </div>
   )
 }
 ```
+
+> WHY conditional mount (`{addOpen && …}`): `AddMediaDialog` calls `useLookup`/`useRootFolders`/`useQualityProfiles`/`useAddMovie`/`useAddSeries` at the top of its body — these run as soon as the component is mounted, even before the Radix dialog decides to render null for `open={false}`. Mounting it only when `addOpen` keeps those queries from firing on every list-page load, and keeps `Movies.test.tsx` (which mocks only `useMovies` and provides no `QueryClientProvider`) green once the real dialog replaces the Task-8 stub.
 
 - [ ] **Step 4: Implement `TvShows.tsx`** (same shape, series hooks/badge).
 
@@ -1413,7 +1416,7 @@ export function TvShows() {
           />
         )}
       />
-      <AddMediaDialog kind="tv" open={addOpen} onOpenChange={setAddOpen} />
+      {addOpen && <AddMediaDialog kind="tv" open={addOpen} onOpenChange={setAddOpen} />}
     </div>
   )
 }
@@ -1480,7 +1483,7 @@ git commit -m "feat(6-2): Movies + TV list pages, routes replace placeholders"
 - Consumes: `useLookup`, `useAddMovie`, `useAddSeries`, `useRootFolders`, `useQualityProfiles` (Task 5); `useToast` (Task 4); `Dialog`, `Select` from `radix-ui`.
 - Produces: `export function AddMediaDialog({ kind, open, onOpenChange }: { kind: "movie" | "tv"; open: boolean; onOpenChange: (o: boolean) => void }): JSX.Element`
 
-- [ ] **Step 1: Implement the `radix-ui` wrappers.** `web/src/components/ui/dialog.tsx`:
+- [ ] **Step 1: Implement the `radix-ui` wrappers.** The unified `radix-ui` package (v1.6.1, already a dependency) exports each primitive as a namespace: `import { Dialog } from "radix-ui"` → `Dialog.Root`/`Dialog.Portal`/`Dialog.Overlay`/`Dialog.Content`/`Dialog.Title`. There's no Slice-1 precedent for this import (button/card/input/label don't use radix), so if this file fails `tsc -b`, verify the export names against `node_modules/radix-ui` first. `web/src/components/ui/dialog.tsx`:
 
 ```tsx
 import { Dialog as D } from "radix-ui"
@@ -1583,7 +1586,7 @@ Expected: FAIL (stub returns null / components missing).
 - [ ] **Step 4: Implement `AddMediaDialog.tsx`** (replace the stub).
 
 ```tsx
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Dialog, DialogTitle } from "@/components/ui/dialog"
 import { Select } from "@/components/ui/select"
 import { useToast } from "@/lib/toast"
@@ -1725,8 +1728,6 @@ export function AddMediaDialog({
 }
 
 function useDebounce(value: string, ms: number, setter: (v: string) => void) {
-  // Local import kept inline to avoid a separate util file for one use.
-  const { useEffect } = require("react") as typeof import("react")
   useEffect(() => {
     const t = setTimeout(() => setter(value), ms)
     return () => clearTimeout(t)
@@ -1734,27 +1735,14 @@ function useDebounce(value: string, ms: number, setter: (v: string) => void) {
 }
 ```
 
-> NOTE: the `require("react")` shim inside `useDebounce` is not valid in ESM — replace it with a top-level `import { useEffect } from "react"` and make `useDebounce` a normal hook. Corrected form: add `useEffect` to the top import (`import { useState, useEffect } from "react"`) and define `useDebounce` without the inline require. The button label in the movie case is "Add Movie" to match the test's `/add movie/i`.
+Note: the movie submit button must read `Add Movie` and the show button `Add Show` — the disabled-state test in Step 2 targets `/add movie/i`.
 
-- [ ] **Step 5: Correct the debounce hook** — top of file `import { useState, useEffect } from "react"`; replace `useDebounce` with:
-
-```tsx
-function useDebounce(value: string, ms: number, setter: (v: string) => void) {
-  useEffect(() => {
-    const t = setTimeout(() => setter(value), ms)
-    return () => clearTimeout(t)
-  }, [value, ms, setter])
-}
-```
-
-Also ensure the movie submit button reads `Add Movie` and the show button `Add Show` (the disabled-state test targets `/add movie/i`).
-
-- [ ] **Step 6: Run the test + typecheck.**
+- [ ] **Step 5: Run the test + typecheck.**
 
 Run (from `web/`): `npm test -- src/features/library/AddMediaDialog.test.tsx && npx tsc -b`
 Expected: PASS, tsc exit 0.
 
-- [ ] **Step 7: Commit.**
+- [ ] **Step 6: Commit.**
 
 ```bash
 git add web/src/components/ui/dialog.tsx web/src/components/ui/select.tsx web/src/features/library/AddMediaDialog.tsx web/src/features/library/AddMediaDialog.test.tsx
