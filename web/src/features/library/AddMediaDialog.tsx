@@ -3,7 +3,7 @@ import { Dialog, DialogTitle } from "@/components/ui/dialog"
 import { Select } from "@/components/ui/select"
 import { useToast } from "@/lib/toast"
 import {
-  useLookup, useRootFolders, useQualityProfiles, useAddMovie, useAddSeries,
+  useLookup, useRootFolders, useAddMovie, useAddSeries,
 } from "./api"
 import type { MetadataResult, MediaKind } from "./types"
 
@@ -19,7 +19,6 @@ export function AddMediaDialog({
   const [debounced, setDebounced] = useState("")
   const [picked, setPicked] = useState<MetadataResult | null>(null)
   const [rootFolderId, setRootFolderId] = useState("")
-  const [profileId, setProfileId] = useState("")
   const [monitorOption, setMonitorOption] = useState<"all" | "future" | "none">("all")
   const [monitored, setMonitored] = useState(true)
 
@@ -28,7 +27,6 @@ export function AddMediaDialog({
 
   const lookup = useLookup(debounced, kind)
   const rootFolders = useRootFolders()
-  const profiles = useQualityProfiles()
   const addMovie = useAddMovie()
   const addSeries = useAddSeries()
 
@@ -53,7 +51,8 @@ export function AddMediaDialog({
   }
 
   function reset() {
-    setTerm(""); setDebounced(""); setPicked(null); setRootFolderId(""); setProfileId("")
+    setTerm(""); setDebounced(""); setPicked(null); setRootFolderId("")
+    setMonitorOption("all"); setMonitored(true)
   }
 
   return (
@@ -98,14 +97,6 @@ export function AddMediaDialog({
               ))}
             </Select>
           )}
-
-          <label className="text-xs text-[var(--color-muted)]">Quality profile (optional)</label>
-          <Select aria-label="Quality profile" value={profileId} onChange={setProfileId} disabled={(profiles.data ?? []).length === 0}>
-            <option value="">{(profiles.data ?? []).length === 0 ? "None configured yet (optional)" : "None"}</option>
-            {(profiles.data ?? []).map((p) => (
-              <option key={p.id} value={p.id}>{p.name}</option>
-            ))}
-          </Select>
 
           {kind === "tv" ? (
             <>

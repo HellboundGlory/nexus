@@ -11,7 +11,6 @@ vi.mock("@/features/library/api", async (orig) => {
     ...actual,
     useLookup: vi.fn(),
     useRootFolders: vi.fn(),
-    useQualityProfiles: vi.fn(),
     useAddMovie: vi.fn(),
     useAddSeries: vi.fn(),
   }
@@ -21,7 +20,6 @@ beforeEach(() => vi.clearAllMocks())
 
 function stub() {
   vi.mocked(lib.useLookup).mockReturnValue({ data: [{ tmdbId: 1, title: "Dune", year: 2021, overview: "", posterUrl: "", kind: "movie" }], isLoading: false } as unknown as ReturnType<typeof lib.useLookup>)
-  vi.mocked(lib.useQualityProfiles).mockReturnValue({ data: [] } as unknown as ReturnType<typeof lib.useQualityProfiles>)
   vi.mocked(lib.useAddMovie).mockReturnValue({ mutateAsync: vi.fn(), isPending: false } as unknown as ReturnType<typeof lib.useAddMovie>)
   vi.mocked(lib.useAddSeries).mockReturnValue({ mutateAsync: vi.fn(), isPending: false } as unknown as ReturnType<typeof lib.useAddSeries>)
 }
