@@ -122,6 +122,67 @@ func TestHistoryAppendAndList(t *testing.T) {
 	}
 }
 
+func TestFilePresenceHelpers(t *testing.T) {
+	st := newImportTestStore(t)
+	ctx := context.Background()
+
+	// Root folder + series + two monitored episodes; one gets a file.
+	rfID, err := st.CreateRootFolder(ctx, "/data/tv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seriesID, err := st.CreateSeries(ctx, Series{TMDBID: 1, Title: "Show", RootFolderID: &rfID, Monitored: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertEpisode(ctx, Episode{SeriesID: seriesID, SeasonNumber: 1, EpisodeNumber: 1, TMDBID: 11, Title: "E1", Monitored: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertEpisode(ctx, Episode{SeriesID: seriesID, SeasonNumber: 1, EpisodeNumber: 2, TMDBID: 12, Title: "E2", Monitored: true}); err != nil {
+		t.Fatal(err)
+	}
+	eps, err := st.ListEpisodes(ctx, seriesID)
+	if err != nil || len(eps) != 2 {
+		t.Fatalf("ListEpisodes: %+v err=%v", eps, err)
+	}
+	ep1ID := eps[0].ID // season 1 episode 1, ordered first
+
+	// A movie with a file.
+	movieID, err := st.CreateMovie(ctx, Movie{TMDBID: 2, Title: "Film", RootFolderID: &rfID, Monitored: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.UpsertMediaFile(ctx, MediaFile{MediaKind: "episode", EpisodeID: &ep1ID, RelativePath: "e1.mkv", Size: 1, QualityID: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.UpsertMediaFile(ctx, MediaFile{MediaKind: "movie", MovieID: &movieID, RelativePath: "film.mkv", Size: 1, QualityID: 1}); err != nil {
+		t.Fatal(err)
+	}
+
+	epFiles, err := st.EpisodeFileIDs(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !epFiles[ep1ID] || len(epFiles) != 1 {
+		t.Fatalf("EpisodeFileIDs = %v, want only ep1", epFiles)
+	}
+	mvFiles, err := st.MovieFileIDs(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !mvFiles[movieID] || len(mvFiles) != 1 {
+		t.Fatalf("MovieFileIDs = %v, want only movie", mvFiles)
+	}
+	stats, err := st.SeriesEpisodeStats(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := stats[seriesID]
+	if got.EpisodeCount != 2 || got.EpisodeFileCount != 1 {
+		t.Fatalf("SeriesEpisodeStats[series] = %+v, want {2 1}", got)
+	}
+}
+
 func TestGrabbedSince(t *testing.T) {
 	st := newImportTestStore(t)
 	ctx := context.Background()

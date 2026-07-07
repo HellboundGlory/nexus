@@ -256,6 +256,74 @@ func (s *Store) ListHistory(ctx context.Context, limit int) ([]HistoryEvent, err
 	return out, rows.Err()
 }
 
+// MovieFileIDs returns the set of movie ids that currently have a file.
+func (s *Store) MovieFileIDs(ctx context.Context) (map[int64]bool, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT movie_id FROM media_files WHERE movie_id IS NOT NULL`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[int64]bool)
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out[id] = true
+	}
+	return out, rows.Err()
+}
+
+// EpisodeFileIDs returns the set of episode ids that currently have a file.
+func (s *Store) EpisodeFileIDs(ctx context.Context) (map[int64]bool, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT episode_id FROM media_files WHERE episode_id IS NOT NULL`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[int64]bool)
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out[id] = true
+	}
+	return out, rows.Err()
+}
+
+// SeriesEpisodeStats reports, per series, the count of monitored episodes and
+// how many of those have a file. Series with no monitored episodes are absent
+// from the map (callers treat a missing key as the zero value).
+type SeriesEpisodeStats struct {
+	EpisodeCount     int
+	EpisodeFileCount int
+}
+
+func (s *Store) SeriesEpisodeStats(ctx context.Context) (map[int64]SeriesEpisodeStats, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT e.series_id,
+		       SUM(CASE WHEN e.monitored = 1 THEN 1 ELSE 0 END) AS monitored_count,
+		       SUM(CASE WHEN e.monitored = 1 AND mf.episode_id IS NOT NULL THEN 1 ELSE 0 END) AS monitored_with_file
+		FROM episodes e
+		LEFT JOIN media_files mf ON mf.episode_id = e.id
+		GROUP BY e.series_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[int64]SeriesEpisodeStats)
+	for rows.Next() {
+		var seriesID int64
+		var count, withFile int
+		if err := rows.Scan(&seriesID, &count, &withFile); err != nil {
+			return nil, err
+		}
+		out[seriesID] = SeriesEpisodeStats{EpisodeCount: count, EpisodeFileCount: withFile}
+	}
+	return out, rows.Err()
+}
+
 // sqliteTimeLayout matches SQLite's CURRENT_TIMESTAMP text format so a bound
 // time compares correctly (lexicographically == chronologically) against
 // created_at values written by the DB default.
