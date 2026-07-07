@@ -12,17 +12,17 @@ import (
 // fakeProvider returns canned metadata; airDate controls the "future" monitor test.
 type fakeProvider struct {
 	series provider.SeriesMetadata
-	movie  provider.MovieMetadata
+	movies provider.MovieMetadata
 }
 
 func (f *fakeProvider) SearchTV(context.Context, string) ([]provider.MetadataResult, error) {
 	return []provider.MetadataResult{{TMDBID: f.series.TMDBID, Title: f.series.Title, Kind: provider.KindTV}}, nil
 }
 func (f *fakeProvider) SearchMovie(context.Context, string) ([]provider.MetadataResult, error) {
-	return []provider.MetadataResult{{TMDBID: f.movie.TMDBID, Title: f.movie.Title, Kind: provider.KindMovie}}, nil
+	return []provider.MetadataResult{{TMDBID: f.movies.TMDBID, Title: f.movies.Title, Kind: provider.KindMovie}}, nil
 }
 func (f *fakeProvider) TVDetails(context.Context, int) (provider.SeriesMetadata, error) { return f.series, nil }
-func (f *fakeProvider) MovieDetails(context.Context, int) (provider.MovieMetadata, error) { return f.movie, nil }
+func (f *fakeProvider) MovieDetails(context.Context, int) (provider.MovieMetadata, error) { return f.movies, nil }
 
 func newTestService(t *testing.T, fp *fakeProvider) (*Service, *store.Store) {
 	t.Helper()
@@ -46,6 +46,10 @@ func sampleSeries() provider.SeriesMetadata {
 			{SeasonNumber: 1, EpisodeNumber: 2, Title: "Future", AirDate: "2999-01-01"},
 		}}},
 	}
+}
+
+func sampleMovies() provider.MovieMetadata {
+	return provider.MovieMetadata{TMDBID: 200, Title: "Film", Year: 2020}
 }
 
 func TestAddSeriesMonitorFuture(t *testing.T) {
@@ -101,7 +105,7 @@ func TestAddSeriesInvalidRootFolder(t *testing.T) {
 }
 
 func TestAddMovie(t *testing.T) {
-	fp := &fakeProvider{movie: provider.MovieMetadata{TMDBID: 200, Title: "Film", Year: 2020}}
+	fp := &fakeProvider{movies: sampleMovies()}
 	svc, _ := newTestService(t, fp)
 	m, err := svc.AddMovie(context.Background(), AddMovieRequest{TMDBID: 200, Monitored: true})
 	if err != nil {

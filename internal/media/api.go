@@ -134,22 +134,40 @@ func (a *API) addSeries(w http.ResponseWriter, r *http.Request) {
 	api.WriteJSON(w, http.StatusCreated, se)
 }
 
+type seriesListItem struct {
+	store.Series
+	EpisodeCount     int `json:"episodeCount"`
+	EpisodeFileCount int `json:"episodeFileCount"`
+}
+
 func (a *API) listSeries(w http.ResponseWriter, r *http.Request) {
 	rows, err := a.store.ListSeries(r.Context())
 	if err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "internal", "failed to list series")
 		return
 	}
-	if rows == nil {
-		rows = []store.Series{}
+	stats, err := a.store.SeriesEpisodeStats(r.Context())
+	if err != nil {
+		api.WriteError(w, http.StatusInternalServerError, "internal", "failed to list series")
+		return
 	}
-	api.WriteJSON(w, http.StatusOK, rows)
+	out := make([]seriesListItem, 0, len(rows))
+	for _, s := range rows {
+		st := stats[s.ID]
+		out = append(out, seriesListItem{Series: s, EpisodeCount: st.EpisodeCount, EpisodeFileCount: st.EpisodeFileCount})
+	}
+	api.WriteJSON(w, http.StatusOK, out)
+}
+
+type episodeDTO struct {
+	store.Episode
+	HasFile bool `json:"hasFile"`
 }
 
 type seriesDetail struct {
 	store.Series
-	Seasons  []store.Season  `json:"seasons"`
-	Episodes []store.Episode `json:"episodes"`
+	Seasons  []store.Season `json:"seasons"`
+	Episodes []episodeDTO   `json:"episodes"`
 }
 
 func (a *API) getSeries(w http.ResponseWriter, r *http.Request) {
@@ -174,7 +192,16 @@ func (a *API) getSeries(w http.ResponseWriter, r *http.Request) {
 	if episodes == nil {
 		episodes = []store.Episode{}
 	}
-	api.WriteJSON(w, http.StatusOK, seriesDetail{Series: *se, Seasons: seasons, Episodes: episodes})
+	epFiles, err := a.store.EpisodeFileIDs(r.Context())
+	if err != nil {
+		api.WriteError(w, http.StatusInternalServerError, "internal", "failed to load series")
+		return
+	}
+	epDTOs := make([]episodeDTO, 0, len(episodes))
+	for _, e := range episodes {
+		epDTOs = append(epDTOs, episodeDTO{Episode: e, HasFile: epFiles[e.ID]})
+	}
+	api.WriteJSON(w, http.StatusOK, seriesDetail{Series: *se, Seasons: seasons, Episodes: epDTOs})
 }
 
 func (a *API) deleteSeries(w http.ResponseWriter, r *http.Request) {
@@ -313,16 +340,27 @@ func (a *API) addMovie(w http.ResponseWriter, r *http.Request) {
 	api.WriteJSON(w, http.StatusCreated, m)
 }
 
+type movieDTO struct {
+	store.Movie
+	HasFile bool `json:"hasFile"`
+}
+
 func (a *API) listMovies(w http.ResponseWriter, r *http.Request) {
 	rows, err := a.store.ListMovies(r.Context())
 	if err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "internal", "failed to list movies")
 		return
 	}
-	if rows == nil {
-		rows = []store.Movie{}
+	files, err := a.store.MovieFileIDs(r.Context())
+	if err != nil {
+		api.WriteError(w, http.StatusInternalServerError, "internal", "failed to list movies")
+		return
 	}
-	api.WriteJSON(w, http.StatusOK, rows)
+	out := make([]movieDTO, 0, len(rows))
+	for _, m := range rows {
+		out = append(out, movieDTO{Movie: m, HasFile: files[m.ID]})
+	}
+	api.WriteJSON(w, http.StatusOK, out)
 }
 
 func (a *API) getMovie(w http.ResponseWriter, r *http.Request) {
@@ -339,7 +377,12 @@ func (a *API) getMovie(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusInternalServerError, "internal", "failed to load movie")
 		return
 	}
-	api.WriteJSON(w, http.StatusOK, m)
+	files, err := a.store.MovieFileIDs(r.Context())
+	if err != nil {
+		api.WriteError(w, http.StatusInternalServerError, "internal", "failed to load movie")
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, movieDTO{Movie: *m, HasFile: files[m.ID]})
 }
 
 func (a *API) deleteMovie(w http.ResponseWriter, r *http.Request) {

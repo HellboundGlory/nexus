@@ -148,3 +148,85 @@ func TestAPINoCredentialLeak(t *testing.T) {
 		t.Fatalf("response leaked a credential field: %s", w.Body.String())
 	}
 }
+
+func TestAPIListEnrichment(t *testing.T) {
+	fp := &fakeProvider{series: sampleSeries(), movies: sampleMovies()}
+	r, st := newTestAPI(t, fp)
+	ctx := context.Background()
+
+	// Add a movie and a series through the API so ids exist.
+	post(t, r, "/movies", `{"tmdbId":200,"monitored":true}`, http.StatusCreated)
+	post(t, r, "/series", `{"tmdbId":100,"monitorOption":"all"}`, http.StatusCreated)
+
+	// Attach a file to the movie directly in the store.
+	movies, _ := st.ListMovies(ctx)
+	if len(movies) == 0 {
+		t.Fatal("no movie added")
+	}
+	if _, err := st.UpsertMediaFile(ctx, store.MediaFile{MediaKind: "movie", MovieID: &movies[0].ID, RelativePath: "m.mkv", Size: 1, QualityID: 1}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Movie list carries hasFile=true.
+	body := get(t, r, "/movies", http.StatusOK)
+	var ml []map[string]any
+	mustJSON(t, body, &ml)
+	if len(ml) != 1 || ml[0]["hasFile"] != true {
+		t.Fatalf("movie list missing hasFile: %s", body)
+	}
+
+	// Series list carries episodeCount / episodeFileCount.
+	body = get(t, r, "/series", http.StatusOK)
+	var sl []map[string]any
+	mustJSON(t, body, &sl)
+	if len(sl) != 1 {
+		t.Fatalf("series list len: %s", body)
+	}
+	if _, ok := sl[0]["episodeCount"]; !ok {
+		t.Fatalf("series list missing episodeCount: %s", body)
+	}
+	if _, ok := sl[0]["episodeFileCount"]; !ok {
+		t.Fatalf("series list missing episodeFileCount: %s", body)
+	}
+
+	// Series detail episodes carry hasFile.
+	sid := int64(sl[0]["id"].(float64))
+	body = get(t, r, "/series/"+strconv.FormatInt(sid, 10), http.StatusOK)
+	var detail map[string]any
+	mustJSON(t, body, &detail)
+	eps, _ := detail["episodes"].([]any)
+	if len(eps) == 0 {
+		t.Fatalf("series detail has no episodes: %s", body)
+	}
+	first := eps[0].(map[string]any)
+	if _, ok := first["hasFile"]; !ok {
+		t.Fatalf("episode missing hasFile: %s", body)
+	}
+}
+
+// small helpers local to the test file
+func post(t *testing.T, r http.Handler, path, body string, want int) {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != want {
+		t.Fatalf("POST %s = %d want %d body=%s", path, w.Code, want, w.Body.String())
+	}
+}
+func get(t *testing.T, r http.Handler, path string, want int) string {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != want {
+		t.Fatalf("GET %s = %d want %d body=%s", path, w.Code, want, w.Body.String())
+	}
+	return w.Body.String()
+}
+func mustJSON(t *testing.T, body string, v any) {
+	t.Helper()
+	if err := json.Unmarshal([]byte(body), v); err != nil {
+		t.Fatalf("json: %v body=%s", err, body)
+	}
+}
