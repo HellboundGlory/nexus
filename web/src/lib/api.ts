@@ -23,7 +23,7 @@ export function setUnauthorizedHandler(fn: (() => void) | null): void {
   unauthorizedHandler = fn
 }
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+async function request<T>(method: string, path: string, body?: unknown, skipAuthHandler = false): Promise<T> {
   const init: RequestInit = {
     method,
     credentials: "include",
@@ -31,7 +31,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     body: body === undefined ? undefined : JSON.stringify(body),
   }
   const res = await fetch(`${BASE}${path}`, init)
-  if (res.status === 401 && unauthorizedHandler) unauthorizedHandler()
+  if (res.status === 401 && !skipAuthHandler && unauthorizedHandler) unauthorizedHandler()
   if (!res.ok) throw await toApiError(res)
   if (res.status === 204) return undefined as T
   const text = await res.text()
@@ -56,12 +56,18 @@ export function apiGet<T>(path: string): Promise<T> {
 export function apiPost<T>(path: string, body?: unknown): Promise<T> {
   return request<T>("POST", path, body)
 }
+export function apiPut<T>(path: string, body?: unknown): Promise<T> {
+  return request<T>("PUT", path, body)
+}
+export function apiDelete<T>(path: string): Promise<T> {
+  return request<T>("DELETE", path)
+}
 
 export function getStatus(): Promise<SystemStatus> {
   return apiGet<SystemStatus>("/system/status")
 }
 export function login(username: string, password: string): Promise<void> {
-  return apiPost<void>("/auth/login", { username, password })
+  return request<void>("POST", "/auth/login", { username, password }, true)
 }
 export function logout(): Promise<void> {
   return apiPost<void>("/auth/logout")
