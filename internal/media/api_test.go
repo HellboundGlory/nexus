@@ -202,6 +202,14 @@ func TestAPIListEnrichment(t *testing.T) {
 	if _, ok := first["hasFile"]; !ok {
 		t.Fatalf("episode missing hasFile: %s", body)
 	}
+	// Series detail also carries the monitored-only progress counts the header
+	// badge reads (must mirror the list view, not be omitted).
+	if _, ok := detail["episodeCount"]; !ok {
+		t.Fatalf("series detail missing episodeCount: %s", body)
+	}
+	if _, ok := detail["episodeFileCount"]; !ok {
+		t.Fatalf("series detail missing episodeFileCount: %s", body)
+	}
 }
 
 // small helpers local to the test file

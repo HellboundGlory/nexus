@@ -166,8 +166,10 @@ type episodeDTO struct {
 
 type seriesDetail struct {
 	store.Series
-	Seasons  []store.Season `json:"seasons"`
-	Episodes []episodeDTO   `json:"episodes"`
+	EpisodeCount     int            `json:"episodeCount"`
+	EpisodeFileCount int            `json:"episodeFileCount"`
+	Seasons          []store.Season `json:"seasons"`
+	Episodes         []episodeDTO   `json:"episodes"`
 }
 
 func (a *API) getSeries(w http.ResponseWriter, r *http.Request) {
@@ -197,11 +199,27 @@ func (a *API) getSeries(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusInternalServerError, "internal", "failed to load series")
 		return
 	}
+	// Enrich with the same monitored-only progress counts the list view shows
+	// (see seriesListItem/SeriesEpisodeStats) so the detail header badge matches.
 	epDTOs := make([]episodeDTO, 0, len(episodes))
+	var monitoredCount, monitoredWithFile int
 	for _, e := range episodes {
-		epDTOs = append(epDTOs, episodeDTO{Episode: e, HasFile: epFiles[e.ID]})
+		hasFile := epFiles[e.ID]
+		epDTOs = append(epDTOs, episodeDTO{Episode: e, HasFile: hasFile})
+		if e.Monitored {
+			monitoredCount++
+			if hasFile {
+				monitoredWithFile++
+			}
+		}
 	}
-	api.WriteJSON(w, http.StatusOK, seriesDetail{Series: *se, Seasons: seasons, Episodes: epDTOs})
+	api.WriteJSON(w, http.StatusOK, seriesDetail{
+		Series:           *se,
+		EpisodeCount:     monitoredCount,
+		EpisodeFileCount: monitoredWithFile,
+		Seasons:          seasons,
+		Episodes:         epDTOs,
+	})
 }
 
 func (a *API) deleteSeries(w http.ResponseWriter, r *http.Request) {
