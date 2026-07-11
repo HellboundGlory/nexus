@@ -7,6 +7,9 @@ import { Dashboard } from "@/pages/Dashboard"
 import { Movies } from "@/pages/Movies"
 import { TvShows } from "@/pages/TvShows"
 import { MediaDetail } from "@/pages/MediaDetail"
+import { Navigate } from "react-router-dom"
+import { SettingsLayout } from "@/features/settings/SettingsLayout"
+import { ConnectionsSection } from "@/features/settings/ConnectionsSection"
 
 export const router = createBrowserRouter([
   { path: "/login", element: <Login /> },
@@ -25,7 +28,15 @@ export const router = createBrowserRouter([
       { path: "tv/:id", element: <MediaDetail kind="series" /> },
       { path: "calendar", element: <Placeholder title="Calendar" /> },
       { path: "activity", element: <Placeholder title="Activity" /> },
-      { path: "settings", element: <Placeholder title="Settings" /> },
+      {
+        path: "settings",
+        element: <SettingsLayout />,
+        children: [
+          { index: true, element: <Navigate to="/settings/indexers" replace /> },
+          { path: "indexers", element: <ConnectionsSection kind="indexer" /> },
+          { path: "downloadclients", element: <ConnectionsSection kind="downloadclient" /> },
+        ],
+      },
       { path: "system", element: <Placeholder title="System" /> },
     ],
   },
