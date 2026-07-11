@@ -81,4 +81,22 @@ describe("ConnectionDialog", () => {
     expect(req.path).toBe("/indexer/test")
     expect(req.body).toMatchObject({ implementation: "newznab", name: "ix", baseUrl: "http://x" })
   })
+
+  it("includes the retyped secret on save and tests the UNSAVED endpoint when editing", async () => {
+    const existing = { id: 9, name: "ix", implementation: "newznab", enabled: true, priority: 25, status: "ok", lastCheck: null, failMessage: "", baseUrl: "http://x" }
+    const { save, test } = setup(existing)
+    await userEvent.type(screen.getByLabelText("API Key"), "newkey")
+
+    await userEvent.click(screen.getByRole("button", { name: /save/i }))
+    await waitFor(() => expect(save).toHaveBeenCalled())
+    const saveArg = save.mock.calls[0][0]
+    expect(saveArg.id).toBe(9)
+    expect(saveArg.payload.apiKey).toBe("newkey")
+
+    await userEvent.click(screen.getByRole("button", { name: /test/i }))
+    await waitFor(() => expect(test).toHaveBeenCalled())
+    const req = test.mock.calls[0][0]
+    expect(req.path).toBe("/indexer/test")
+    expect(req.body.apiKey).toBe("newkey")
+  })
 })
