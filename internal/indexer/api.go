@@ -143,6 +143,15 @@ func (a *API) update(w http.ResponseWriter, r *http.Request) {
 	}
 	ix := p.toStore()
 	ix.ID = id
+	// Secrets are write-only (APIKey is json:"-"), so the edit form loads the key
+	// blank. An empty incoming key means "keep the stored one" — otherwise every
+	// edit-without-retyping would wipe it. Update-only: empty on create is a
+	// legitimate keyless indexer.
+	if p.APIKey == "" {
+		if existing, err := a.store.GetIndexer(r.Context(), id); err == nil {
+			ix.APIKey = existing.APIKey
+		}
+	}
 	if err := a.store.UpdateIndexer(r.Context(), ix); err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "internal", "failed to update indexer")
 		return
