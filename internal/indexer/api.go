@@ -148,7 +148,12 @@ func (a *API) update(w http.ResponseWriter, r *http.Request) {
 	// edit-without-retyping would wipe it. Update-only: empty on create is a
 	// legitimate keyless indexer.
 	if p.APIKey == "" {
-		if existing, err := a.store.GetIndexer(r.Context(), id); err == nil {
+		existing, err := a.store.GetIndexer(r.Context(), id)
+		if err != nil && err != store.ErrNotFound {
+			api.WriteError(w, http.StatusInternalServerError, "internal", "failed to load indexer")
+			return
+		}
+		if err == nil {
 			ix.APIKey = existing.APIKey
 		}
 	}

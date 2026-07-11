@@ -160,7 +160,12 @@ func (a *API) update(w http.ResponseWriter, r *http.Request) {
 	// the stored one" so an edit that doesn't re-enter the key can't wipe it.
 	// Update-only.
 	if p.APIKey == "" {
-		if existing, err := a.store.GetDownloadClient(r.Context(), id); err == nil {
+		existing, err := a.store.GetDownloadClient(r.Context(), id)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			api.WriteError(w, http.StatusInternalServerError, "internal", "failed to load download client")
+			return
+		}
+		if err == nil {
 			dc.APIKey = existing.APIKey
 		}
 	}
