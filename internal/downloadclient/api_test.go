@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -89,6 +90,58 @@ func TestDownloadClientAPICreateListGrabQueue(t *testing.T) {
 	router.ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/api/v1/queue/1/SABnzbd_nzo_aaa", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("remove: %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestDownloadClientUpdatePreservesStoredSecretWhenBlank(t *testing.T) {
+	st := newTestStore(t)
+	svc := NewService(st)
+	a := NewAPI(st, svc)
+	router := mountedRouter(t, a) // NB: downloadclient's helper is (t, a), unlike indexer's (t, svc, a)
+
+	create, _ := json.Marshal(map[string]any{
+		"name": "sab", "implementation": "sabnzbd", "host": "localhost", "port": 8080, "apiKey": "SECRET-PW-1", "enabled": true, "priority": 25,
+	})
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/v1/downloadclient", bytes.NewReader(create)))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create: %d body=%s", rec.Code, rec.Body.String())
+	}
+	var created struct {
+		ID int64 `json:"id"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &created)
+
+	update, _ := json.Marshal(map[string]any{
+		"name": "sab-renamed", "implementation": "sabnzbd", "host": "localhost", "port": 8080, "apiKey": "", "enabled": true, "priority": 30,
+	})
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodPut, "/api/v1/downloadclient/"+strconv.FormatInt(created.ID, 10), bytes.NewReader(update)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("update: %d body=%s", rec.Code, rec.Body.String())
+	}
+	got, err := st.GetDownloadClient(context.Background(), created.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.APIKey != "SECRET-PW-1" {
+		t.Fatalf("stored secret wiped: got %q", got.APIKey)
+	}
+	if got.Name != "sab-renamed" {
+		t.Fatalf("name not updated: %q", got.Name)
+	}
+
+	update2, _ := json.Marshal(map[string]any{
+		"name": "sab-renamed", "implementation": "sabnzbd", "host": "localhost", "port": 8080, "apiKey": "NEW-PW-2", "enabled": true, "priority": 30,
+	})
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodPut, "/api/v1/downloadclient/"+strconv.FormatInt(created.ID, 10), bytes.NewReader(update2)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("update2: %d", rec.Code)
+	}
+	got, _ = st.GetDownloadClient(context.Background(), created.ID)
+	if got.APIKey != "NEW-PW-2" {
+		t.Fatalf("new secret not stored: got %q", got.APIKey)
 	}
 }
 

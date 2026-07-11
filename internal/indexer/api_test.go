@@ -2,10 +2,12 @@ package indexer
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -76,5 +78,62 @@ func TestIndexerAPICreateAndSearch(t *testing.T) {
 	}
 	if len(res.Releases) != 1 || res.Releases[0].Protocol != provider.ProtocolTorrent {
 		t.Fatalf("unexpected search result: %+v", res)
+	}
+}
+
+func TestIndexerUpdatePreservesStoredKeyWhenBlank(t *testing.T) {
+	st := newTestStore(t)
+	svc := NewService(st).WithHTTPClient(http.DefaultClient)
+	a := NewAPI(st, svc, http.DefaultClient)
+	router := mountedRouter(t, svc, a)
+
+	// Create with a secret key (bad URL is fine: caps discovery is best-effort).
+	create, _ := json.Marshal(map[string]any{
+		"name": "ix", "implementation": "torznab", "baseUrl": "http://127.0.0.1:1", "apiKey": "SECRET-KEY-123", "enabled": true, "priority": 25,
+	})
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/v1/indexer", bytes.NewReader(create)))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create: %d body=%s", rec.Code, rec.Body.String())
+	}
+	var created struct {
+		ID int64 `json:"id"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &created)
+
+	// Update WITHOUT apiKey (rename only).
+	update, _ := json.Marshal(map[string]any{
+		"name": "ix-renamed", "implementation": "torznab", "baseUrl": "http://127.0.0.1:1", "apiKey": "", "enabled": true, "priority": 30,
+	})
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodPut, "/api/v1/indexer/"+strconv.FormatInt(created.ID, 10), bytes.NewReader(update)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("update: %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	// The stored key must survive (read in-process; it's json:"-").
+	got, err := st.GetIndexer(context.Background(), created.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.APIKey != "SECRET-KEY-123" {
+		t.Fatalf("stored key wiped: got %q want %q", got.APIKey, "SECRET-KEY-123")
+	}
+	if got.Name != "ix-renamed" {
+		t.Fatalf("name not updated: %q", got.Name)
+	}
+
+	// Update WITH a new apiKey overwrites.
+	update2, _ := json.Marshal(map[string]any{
+		"name": "ix-renamed", "implementation": "torznab", "baseUrl": "http://127.0.0.1:1", "apiKey": "NEW-KEY-456", "enabled": true, "priority": 30,
+	})
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodPut, "/api/v1/indexer/"+strconv.FormatInt(created.ID, 10), bytes.NewReader(update2)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("update2: %d", rec.Code)
+	}
+	got, _ = st.GetIndexer(context.Background(), created.ID)
+	if got.APIKey != "NEW-KEY-456" {
+		t.Fatalf("new key not stored: got %q", got.APIKey)
 	}
 }
