@@ -156,6 +156,14 @@ func (a *API) update(w http.ResponseWriter, r *http.Request) {
 	}
 	dc := p.toStore()
 	dc.ID = id
+	// Secrets are write-only (APIKey is json:"-"). Empty incoming key means "keep
+	// the stored one" so an edit that doesn't re-enter the key can't wipe it.
+	// Update-only.
+	if p.APIKey == "" {
+		if existing, err := a.store.GetDownloadClient(r.Context(), id); err == nil {
+			dc.APIKey = existing.APIKey
+		}
+	}
 	if err := a.store.UpdateDownloadClient(r.Context(), dc); err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "internal", "failed to update download client")
 		return
