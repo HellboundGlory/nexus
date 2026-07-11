@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"testing"
 )
 
@@ -109,5 +110,36 @@ func TestMovieCRUD(t *testing.T) {
 	}
 	if _, err := s.GetMovie(ctx, id); err != ErrNotFound {
 		t.Fatalf("want ErrNotFound got %v", err)
+	}
+}
+
+func TestDeleteRootFolderInUseAndMissing(t *testing.T) {
+	ctx := context.Background()
+	st := newTestStore(t)
+
+	// Unused folder deletes cleanly.
+	id, err := st.CreateRootFolder(ctx, "/data/unused")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := st.DeleteRootFolder(ctx, id); err != nil {
+		t.Fatalf("delete unused: %v", err)
+	}
+
+	// Missing id → ErrNotFound.
+	if err := st.DeleteRootFolder(ctx, 99999); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("delete missing: want ErrNotFound, got %v", err)
+	}
+
+	// In-use folder → ErrRootFolderInUse.
+	inUse, err := st.CreateRootFolder(ctx, "/data/inuse")
+	if err != nil {
+		t.Fatalf("create inuse: %v", err)
+	}
+	if _, err := st.CreateSeries(ctx, Series{TMDBID: 555, Title: "Ref", RootFolderID: &inUse}); err != nil {
+		t.Fatalf("create series: %v", err)
+	}
+	if err := st.DeleteRootFolder(ctx, inUse); !errors.Is(err, ErrRootFolderInUse) {
+		t.Fatalf("delete in-use: want ErrRootFolderInUse, got %v", err)
 	}
 }

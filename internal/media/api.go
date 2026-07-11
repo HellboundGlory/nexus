@@ -532,9 +532,15 @@ func (a *API) deleteRootFolder(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := a.store.DeleteRootFolder(r.Context(), id); err != nil {
+	err := a.store.DeleteRootFolder(r.Context(), id)
+	switch {
+	case err == nil:
+		api.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	case errors.Is(err, store.ErrRootFolderInUse):
+		api.WriteError(w, http.StatusConflict, "conflict", "root folder is in use")
+	case errors.Is(err, store.ErrNotFound):
+		api.WriteError(w, http.StatusNotFound, "not_found", "root folder not found")
+	default:
 		api.WriteError(w, http.StatusInternalServerError, "internal", "failed to delete root folder")
-		return
 	}
-	api.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }

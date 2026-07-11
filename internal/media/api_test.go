@@ -79,6 +79,46 @@ func TestAPIRootFolderLifecycle(t *testing.T) {
 	}
 }
 
+func TestDeleteRootFolderStatuses(t *testing.T) {
+	fp := &fakeProvider{}
+	r, st := newTestAPI(t, fp)
+
+	// Missing → 404.
+	req := httptest.NewRequest(http.MethodDelete, "/rootfolder/99999", nil)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("missing: want 404, got %d", rec.Code)
+	}
+
+	// In-use → 409.
+	rfID, err := st.CreateRootFolder(context.Background(), "/data/x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.CreateMovie(context.Background(), store.Movie{TMDBID: 777, Title: "M", RootFolderID: &rfID}); err != nil {
+		t.Fatal(err)
+	}
+	req = httptest.NewRequest(http.MethodDelete, "/rootfolder/"+strconv.FormatInt(rfID, 10), nil)
+	rec = httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("in-use: want 409, got %d", rec.Code)
+	}
+
+	// Unused → 200.
+	rf2, err := st.CreateRootFolder(context.Background(), "/data/y")
+	if err != nil {
+		t.Fatal(err)
+	}
+	req = httptest.NewRequest(http.MethodDelete, "/rootfolder/"+strconv.FormatInt(rf2, 10), nil)
+	rec = httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("unused: want 200, got %d", rec.Code)
+	}
+}
+
 func TestAPIAssignQualityProfile(t *testing.T) {
 	fp := &fakeProvider{series: sampleSeries()}
 	r, st := newTestAPI(t, fp)
