@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import { apiGet, apiPost, apiPut, apiDelete } from "@/lib/api"
-import type { NamingConfig, RootFolder } from "./configTypes"
+import { apiGet, apiPost, apiPut, apiDelete, getStatus } from "@/lib/api"
+import type { AutomationConfig, NamingConfig, RootFolder } from "./configTypes"
 
 export const configKeys = {
   rootFolders: ["settings", "rootfolders"] as const,
@@ -39,4 +39,20 @@ export function useSaveNaming() {
     mutationFn: (cfg: NamingConfig) => apiPut<NamingConfig>("/config/naming", cfg),
     onSuccess: () => qc.invalidateQueries({ queryKey: configKeys.naming }),
   })
+}
+
+export function useAutomationConfig() {
+  return useQuery({ queryKey: configKeys.automation, queryFn: () => apiGet<AutomationConfig>("/automation/config") })
+}
+
+export function useSaveAutomationConfig() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (cfg: AutomationConfig) => apiPut<AutomationConfig>("/automation/config", cfg),
+    onSuccess: () => qc.invalidateQueries({ queryKey: configKeys.automation }),
+  })
+}
+
+export function useSystemStatus() {
+  return useQuery({ queryKey: configKeys.systemStatus, queryFn: () => getStatus() })
 }
