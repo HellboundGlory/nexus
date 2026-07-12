@@ -63,40 +63,45 @@ export function QueueSection() {
           </tr>
         </thead>
         <tbody>
-          {rows.map((r) => (
-            <tr key={r.id} className="border-b border-[var(--color-border)] align-top last:border-b-0">
-              <td className="py-2.5 pr-4">
-                <div className="font-medium">{resolveTitle(r, movieMap, seriesMap)}</div>
-                <div className="truncate text-xs text-[var(--color-muted)]">{r.sourceTitle}</div>
-                {r.status === "failed" && r.error ? (
-                  <div className="text-xs text-[var(--color-warn)]">{r.error}</div>
-                ) : null}
-              </td>
-              <td className="py-2.5 pr-4 text-[var(--color-muted)]">{r.mediaKind}</td>
-              <td className="py-2.5 pr-4">{qualityName(r.qualityId, defs.data)}</td>
-              <td className="py-2.5 pr-4 text-[var(--color-muted)]">{r.protocol}</td>
-              <td className={`py-2.5 pr-4 font-semibold ${toneClass[statusTone(r.status)]}`}>{statusLabel(r.status)}</td>
-              <td className="whitespace-nowrap py-2.5 pr-4 text-[var(--color-muted)]">
-                {relativeTime(new Date(r.createdAt).getTime())}
-              </td>
-              <td className="whitespace-nowrap py-2.5 pr-4 text-right">
-                {(r.status === "failed" || r.status === "grabbed") && (
+          {rows.map((r) => {
+            const title = resolveTitle(r, movieMap, seriesMap)
+            return (
+              <tr key={r.id} className="border-b border-[var(--color-border)] align-top last:border-b-0">
+                <td className="py-2.5 pr-4">
+                  <div className="font-medium">{title}</div>
+                  {r.sourceTitle && r.sourceTitle !== title ? (
+                    <div className="truncate text-xs text-[var(--color-muted)]">{r.sourceTitle}</div>
+                  ) : null}
+                  {r.status === "failed" && r.error ? (
+                    <div className="text-xs text-[var(--color-warn)]">{r.error}</div>
+                  ) : null}
+                </td>
+                <td className="py-2.5 pr-4 text-[var(--color-muted)]">{r.mediaKind}</td>
+                <td className="py-2.5 pr-4">{qualityName(r.qualityId, defs.data)}</td>
+                <td className="py-2.5 pr-4 text-[var(--color-muted)]">{r.protocol}</td>
+                <td className={`py-2.5 pr-4 font-semibold ${toneClass[statusTone(r.status)]}`}>{statusLabel(r.status)}</td>
+                <td className="whitespace-nowrap py-2.5 pr-4 text-[var(--color-muted)]">
+                  {relativeTime(new Date(r.createdAt).getTime())}
+                </td>
+                <td className="whitespace-nowrap py-2.5 pr-4 text-right">
+                  {(r.status === "failed" || r.status === "grabbed") && (
+                    <button
+                      onClick={() => onImport(r.id)}
+                      className="mr-2 rounded border border-[var(--color-border)] px-2 py-1 text-xs hover:border-[var(--color-brand)]"
+                    >
+                      Import
+                    </button>
+                  )}
                   <button
-                    onClick={() => onImport(r.id)}
-                    className="mr-2 rounded border border-[var(--color-border)] px-2 py-1 text-xs hover:border-[var(--color-brand)]"
+                    onClick={() => onRemove(r.id)}
+                    className="rounded border border-[var(--color-border)] px-2 py-1 text-xs text-[var(--color-warn)] hover:border-[var(--color-warn)]"
                   >
-                    Import
+                    Remove
                   </button>
-                )}
-                <button
-                  onClick={() => onRemove(r.id)}
-                  className="rounded border border-[var(--color-border)] px-2 py-1 text-xs text-[var(--color-warn)] hover:border-[var(--color-warn)]"
-                >
-                  Remove
-                </button>
-              </td>
-            </tr>
-          ))}
+                </td>
+              </tr>
+            )
+          })}
         </tbody>
       </table>
     </div>

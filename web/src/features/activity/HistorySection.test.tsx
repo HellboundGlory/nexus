@@ -44,4 +44,13 @@ describe("HistorySection", () => {
     expect(screen.getAllByText("The Matrix (1999)").length).toBeGreaterThan(0)
     expect(screen.getByText("WEBDL-1080p")).toBeInTheDocument()
   })
+
+  it("does not duplicate the subtext when it matches the fallback title", () => {
+    vi.mocked(api.useHistory).mockReturnValue({
+      data: [ev({ movieId: 999, sourceTitle: "Some.Untracked.Release" })],
+      isLoading: false, isError: false,
+    } as never)
+    render(<HistorySection />)
+    expect(screen.getAllByText("Some.Untracked.Release")).toHaveLength(1)
+  })
 })

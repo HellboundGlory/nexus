@@ -33,22 +33,27 @@ export function HistorySection() {
           </tr>
         </thead>
         <tbody>
-          {rows.map((h) => (
-            <tr key={h.id} className="border-b border-[var(--color-border)] align-top last:border-b-0">
-              <td className={`py-2.5 pr-4 font-semibold ${h.eventType === "import_failed" ? "text-[var(--color-warn)]" : "text-[var(--color-fg)]"}`}>
-                {eventLabel(h.eventType)}
-              </td>
-              <td className="py-2.5 pr-4">
-                <div className="font-medium">{resolveTitle(h, movieMap, seriesMap)}</div>
-                {h.sourceTitle ? <div className="truncate text-xs text-[var(--color-muted)]">{h.sourceTitle}</div> : null}
-              </td>
-              <td className="py-2.5 pr-4">{qualityName(h.qualityId, defs.data)}</td>
-              <td className="py-2.5 pr-4 text-[var(--color-muted)]">{h.message || "—"}</td>
-              <td className="whitespace-nowrap py-2.5 pr-4 text-[var(--color-muted)]">
-                {relativeTime(new Date(h.createdAt).getTime())}
-              </td>
-            </tr>
-          ))}
+          {rows.map((h) => {
+            const title = resolveTitle(h, movieMap, seriesMap)
+            return (
+              <tr key={h.id} className="border-b border-[var(--color-border)] align-top last:border-b-0">
+                <td className={`py-2.5 pr-4 font-semibold ${h.eventType === "import_failed" ? "text-[var(--color-warn)]" : "text-[var(--color-fg)]"}`}>
+                  {eventLabel(h.eventType)}
+                </td>
+                <td className="py-2.5 pr-4">
+                  <div className="font-medium">{title}</div>
+                  {h.sourceTitle && h.sourceTitle !== title ? (
+                    <div className="truncate text-xs text-[var(--color-muted)]">{h.sourceTitle}</div>
+                  ) : null}
+                </td>
+                <td className="py-2.5 pr-4">{qualityName(h.qualityId, defs.data)}</td>
+                <td className="py-2.5 pr-4 text-[var(--color-muted)]">{h.message || "—"}</td>
+                <td className="whitespace-nowrap py-2.5 pr-4 text-[var(--color-muted)]">
+                  {relativeTime(new Date(h.createdAt).getTime())}
+                </td>
+              </tr>
+            )
+          })}
         </tbody>
       </table>
     </div>
