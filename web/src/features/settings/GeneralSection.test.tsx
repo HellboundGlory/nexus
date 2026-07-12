@@ -50,4 +50,24 @@ describe("GeneralSection", () => {
     await userEvent.click(screen.getByRole("button", { name: /save/i }))
     expect(save).toHaveBeenCalledWith(expect.objectContaining({ missingSearchBatchSize: 50 }), expect.anything())
   })
+
+  it("omits a NUM field cleared to a non-positive value from the save payload", async () => {
+    const save = vi.fn()
+    setup(save)
+    const interval = screen.getByLabelText(/missing search interval \(hours\)/i)
+    await userEvent.clear(interval)
+    await userEvent.click(screen.getByRole("button", { name: /save/i }))
+    expect(save).toHaveBeenCalledWith(
+      expect.not.objectContaining({ missingSearchIntervalHours: expect.anything() }),
+      expect.anything(),
+    )
+  })
+
+  it("keeps a boolean field set to false in the save payload", async () => {
+    const save = vi.fn()
+    setup(save)
+    await userEvent.click(screen.getByLabelText(/rss sync enabled/i))
+    await userEvent.click(screen.getByRole("button", { name: /save/i }))
+    expect(save).toHaveBeenCalledWith(expect.objectContaining({ rssSyncEnabled: false }), expect.anything())
+  })
 })
