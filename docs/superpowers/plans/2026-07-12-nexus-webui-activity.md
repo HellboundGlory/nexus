@@ -12,6 +12,7 @@
 
 - **No backend changes.** UI only, over existing endpoints. No new Go files, routes, DTOs, or migrations.
 - **TypeScript wire shape is numeric.** `QueueItem.qualityId: number`, `HistoryEvent.qualityId: number | null`, `QualityDefinition.id: number`. Test fixtures MUST use the real numeric shape (repeated 3b lesson — string fixtures hid a real bug).
+- **`mediaKind` wire values are `"movie"` and `"tv"`** — NOT `"series"`. The backend enum is `provider.KindTV = "tv"` / `KindMovie = "movie"` (`internal/core/provider/provider.go`); `store.QueueItem`/`HistoryEvent` marshal it verbatim. All `mediaKind` comparisons and test fixtures MUST use `"tv"` for series/TV rows.
 - **Styling:** existing dark CSS tokens only (`var(--color-border)`, `--color-muted`, `--color-panel`, `--color-fg`, `--color-ok`, `--color-warn`, `--color-brand`). No new global CSS.
 - **User feedback:** existing hand-written toast (`useToast()` → `toast(msg, { variant: "error" })`), inside `ToastProvider` (already wraps the app).
 - **Query keys:** `["queue"]` and `["history"]` (distinct from the library module's `["library", ...]` keys — no collision).
@@ -137,7 +138,7 @@ describe("resolveTitle", () => {
     expect(resolveTitle({ mediaKind: "movie", movieId: 1, sourceTitle: "raw" }, mm, sm)).toBe("The Matrix (1999)")
   })
   it("resolves a series row to the clean title", () => {
-    expect(resolveTitle({ mediaKind: "series", seriesId: 10, sourceTitle: "raw" }, mm, sm)).toBe("The Show")
+    expect(resolveTitle({ mediaKind: "tv", seriesId: 10, sourceTitle: "raw" }, mm, sm)).toBe("The Show")
   })
   it("falls back to sourceTitle when the id is missing (deleted media)", () => {
     expect(resolveTitle({ mediaKind: "movie", movieId: 999, sourceTitle: "Some.Release" }, mm, sm)).toBe("Some.Release")
@@ -242,7 +243,7 @@ export function resolveTitle(
     const t = movieMap.get(row.movieId)
     if (t) return t
   }
-  if (row.mediaKind === "series" && row.seriesId != null) {
+  if (row.mediaKind === "tv" && row.seriesId != null) {
     const t = seriesMap.get(row.seriesId)
     if (t) return t
   }

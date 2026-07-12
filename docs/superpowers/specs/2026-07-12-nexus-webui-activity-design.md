@@ -58,7 +58,7 @@ downloadClientId: string
 clientItemId: string
 protocol: string
 sourceTitle: string
-mediaKind: string            // "movie" | "series"
+mediaKind: string            // "movie" | "tv" (backend enum: provider.KindTV = "tv")
 seriesId?: number            // omitempty
 movieId?: number             // omitempty
 episodeIds: number[]
@@ -73,7 +73,7 @@ updatedAt: string            // RFC3339
 ```
 id: number
 eventType: string            // "grabbed" | "imported" | "upgraded" | "import_failed"
-mediaKind: string            // "movie" | "series"
+mediaKind: string            // "movie" | "tv" (backend enum: provider.KindTV = "tv")
 seriesId?: number            // omitempty
 episodeId?: number           // omitempty
 movieId?: number             // omitempty
@@ -137,7 +137,7 @@ is needed. `react-router` matches `/activity/queue` under the `/activity` NavLin
 **`resolveTitle(row, movieMap, seriesMap)` fallback chain:**
 1. If `row.mediaKind === "movie"` and `row.movieId` present and in `movieMap` →
    clean movie title.
-2. If `row.mediaKind === "series"` and `row.seriesId` present and in `seriesMap` →
+2. If `row.mediaKind === "tv"` and `row.seriesId` present and in `seriesMap` →
    clean series title.
 3. Otherwise (no media id, id not in map because media was deleted, **or** the list
    query has not resolved yet) → fall back to `row.sourceTitle`.
