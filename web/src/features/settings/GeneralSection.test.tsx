@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { ToastProvider } from "@/lib/toast"
 import { GeneralSection } from "./GeneralSection"
@@ -69,5 +69,25 @@ describe("GeneralSection", () => {
     await userEvent.click(screen.getByLabelText(/rss sync enabled/i))
     await userEvent.click(screen.getByRole("button", { name: /save/i }))
     expect(save).toHaveBeenCalledWith(expect.objectContaining({ rssSyncEnabled: false }), expect.anything())
+  })
+
+  it("re-syncs the form to the server config after a save that cleared a field", async () => {
+    // Mutation invokes onSuccess so the component's refetch/re-seed runs; the
+    // server returns the defaulted config (interval 6), not the typed-in 0.
+    const save = vi.fn((_payload, opts) => opts.onSuccess())
+    const refetch = vi.fn().mockResolvedValue({ data: cfg })
+    vi.mocked(api.useSystemStatus).mockReturnValue({ data: { version: "1.2.3", appName: "Nexus", healthy: true, taskCount: 4 }, isLoading: false } as never)
+    vi.mocked(api.useAutomationConfig).mockReturnValue({ data: cfg, isLoading: false, isError: false, refetch } as never)
+    vi.mocked(api.useSaveAutomationConfig).mockReturnValue(mut({ mutate: save }))
+    render(<ToastProvider><GeneralSection /></ToastProvider>)
+
+    const interval = screen.getByLabelText(/missing search interval \(hours\)/i)
+    await userEvent.clear(interval)
+    expect(interval).toHaveValue(0)
+    await userEvent.click(screen.getByRole("button", { name: /save/i }))
+    expect(refetch).toHaveBeenCalled()
+    await waitFor(() =>
+      expect(screen.getByLabelText(/missing search interval \(hours\)/i)).toHaveValue(6),
+    )
   })
 })

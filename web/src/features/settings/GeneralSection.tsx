@@ -38,7 +38,14 @@ export function GeneralSection() {
       if ((clamped[f.key] as number) <= 0) delete (clamped as Record<string, unknown>)[f.key]
     }
     save.mutate(clamped as AutomationConfig, {
-      onSuccess: () => toast("Saved"),
+      // The PUT echoes the raw payload, but the server substitutes defaults for
+      // any omitted non-positive field on read — refetch so the form shows the
+      // values the server actually persisted rather than the stale typed ones.
+      onSuccess: async () => {
+        toast("Saved")
+        const fresh = await cfgQ.refetch()
+        if (fresh.data) setForm(fresh.data)
+      },
       onError: () => toast("Save failed", { variant: "error" }),
     })
   }

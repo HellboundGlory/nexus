@@ -29,6 +29,19 @@ describe("RootFoldersSection", () => {
     expect(add).toHaveBeenCalledWith("/media/movies", expect.anything())
   })
 
+  it("disables Add until a non-whitespace path is entered", async () => {
+    vi.mocked(api.useRootFolders).mockReturnValue({ data: [], isLoading: false, isError: false } as never)
+    vi.mocked(api.useAddRootFolder).mockReturnValue(mut())
+    vi.mocked(api.useDeleteRootFolder).mockReturnValue(mut())
+    render(<ToastProvider><RootFoldersSection /></ToastProvider>)
+    const addBtn = screen.getByRole("button", { name: /add/i })
+    expect(addBtn).toBeDisabled()
+    await userEvent.type(screen.getByPlaceholderText(/path/i), "   ")
+    expect(addBtn).toBeDisabled()
+    await userEvent.type(screen.getByPlaceholderText(/path/i), "/media/x")
+    expect(addBtn).toBeEnabled()
+  })
+
   it("shows an in-use toast on a 409 delete", async () => {
     const mutate = vi.fn((_id, opts) => opts.onError(new ApiError(409, "conflict", "in use")))
     vi.mocked(api.useRootFolders).mockReturnValue({ data: [{ id: 1, path: "/media/tv", createdAt: "" }], isLoading: false, isError: false } as never)
