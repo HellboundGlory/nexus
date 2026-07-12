@@ -10,6 +10,10 @@ import { MediaDetail } from "@/pages/MediaDetail"
 import { Navigate } from "react-router-dom"
 import { SettingsLayout } from "@/features/settings/SettingsLayout"
 import { ConnectionsSection } from "@/features/settings/ConnectionsSection"
+import { QualityProfilesSection } from "@/features/settings/QualityProfilesSection"
+import { RootFoldersSection } from "@/features/settings/RootFoldersSection"
+import { NamingSection } from "@/features/settings/NamingSection"
+import { GeneralSection } from "@/features/settings/GeneralSection"
 
 export const router = createBrowserRouter([
   { path: "/login", element: <Login /> },
@@ -35,6 +39,10 @@ export const router = createBrowserRouter([
           { index: true, element: <Navigate to="/settings/indexers" replace /> },
           { path: "indexers", element: <ConnectionsSection kind="indexer" /> },
           { path: "downloadclients", element: <ConnectionsSection kind="downloadclient" /> },
+          { path: "qualityprofiles", element: <QualityProfilesSection /> },
+          { path: "rootfolders", element: <RootFoldersSection /> },
+          { path: "naming", element: <NamingSection /> },
+          { path: "general", element: <GeneralSection /> },
         ],
       },
       { path: "system", element: <Placeholder title="System" /> },
