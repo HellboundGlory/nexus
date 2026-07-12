@@ -7,6 +7,10 @@ import (
 	"time"
 )
 
+// ErrRootFolderInUse is returned by DeleteRootFolder when a series or movie
+// still references the root folder.
+var ErrRootFolderInUse = errors.New("store: root folder in use")
+
 type RootFolder struct {
 	ID        int64     `json:"id"`
 	Path      string    `json:"path"`
@@ -53,8 +57,24 @@ func (s *Store) ListRootFolders(ctx context.Context) ([]RootFolder, error) {
 }
 
 func (s *Store) DeleteRootFolder(ctx context.Context, id int64) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM root_folders WHERE id = ?`, id)
-	return err
+	var refs int
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT (SELECT COUNT(*) FROM series WHERE root_folder_id = ?) +
+		        (SELECT COUNT(*) FROM movies WHERE root_folder_id = ?)`, id, id).Scan(&refs); err != nil {
+		return err
+	}
+	if refs > 0 {
+		return ErrRootFolderInUse
+	}
+	res, err := s.db.ExecContext(ctx, `DELETE FROM root_folders WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 type Series struct {

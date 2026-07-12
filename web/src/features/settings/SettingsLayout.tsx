@@ -1,10 +1,13 @@
 import { NavLink, Outlet } from "react-router-dom"
 import { cn } from "@/lib/utils"
 
-// 3b appends { to: "/settings/qualityprofiles", label: "Quality Profiles" }, etc.
 const TABS: { to: string; label: string }[] = [
   { to: "/settings/indexers", label: "Indexers" },
   { to: "/settings/downloadclients", label: "Download Clients" },
+  { to: "/settings/qualityprofiles", label: "Quality Profiles" },
+  { to: "/settings/rootfolders", label: "Root Folders" },
+  { to: "/settings/naming", label: "Naming" },
+  { to: "/settings/general", label: "General" },
 ]
 
 export function SettingsLayout() {
