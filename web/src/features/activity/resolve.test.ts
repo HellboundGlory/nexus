@@ -39,7 +39,7 @@ describe("resolveTitle", () => {
     expect(resolveTitle({ mediaKind: "movie", movieId: 1, sourceTitle: "raw" }, mm, sm)).toBe("The Matrix (1999)")
   })
   it("resolves a series row to the clean title", () => {
-    expect(resolveTitle({ mediaKind: "series", seriesId: 10, sourceTitle: "raw" }, mm, sm)).toBe("The Show")
+    expect(resolveTitle({ mediaKind: "tv", seriesId: 10, sourceTitle: "raw" }, mm, sm)).toBe("The Show")
   })
   it("falls back to sourceTitle when the id is missing (deleted media)", () => {
     expect(resolveTitle({ mediaKind: "movie", movieId: 999, sourceTitle: "Some.Release" }, mm, sm)).toBe("Some.Release")

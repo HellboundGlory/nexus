@@ -32,7 +32,7 @@ export function resolveTitle(
     const t = movieMap.get(row.movieId)
     if (t) return t
   }
-  if (row.mediaKind === "series" && row.seriesId != null) {
+  if (row.mediaKind === "tv" && row.seriesId != null) {
     const t = seriesMap.get(row.seriesId)
     if (t) return t
   }
