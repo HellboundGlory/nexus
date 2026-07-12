@@ -14,6 +14,9 @@ import { QualityProfilesSection } from "@/features/settings/QualityProfilesSecti
 import { RootFoldersSection } from "@/features/settings/RootFoldersSection"
 import { NamingSection } from "@/features/settings/NamingSection"
 import { GeneralSection } from "@/features/settings/GeneralSection"
+import { ActivityLayout } from "@/features/activity/ActivityLayout"
+import { QueueSection } from "@/features/activity/QueueSection"
+import { HistorySection } from "@/features/activity/HistorySection"
 
 export const router = createBrowserRouter([
   { path: "/login", element: <Login /> },
@@ -31,7 +34,15 @@ export const router = createBrowserRouter([
       { path: "movies/:id", element: <MediaDetail kind="movie" /> },
       { path: "tv/:id", element: <MediaDetail kind="series" /> },
       { path: "calendar", element: <Placeholder title="Calendar" /> },
-      { path: "activity", element: <Placeholder title="Activity" /> },
+      {
+        path: "activity",
+        element: <ActivityLayout />,
+        children: [
+          { index: true, element: <Navigate to="/activity/queue" replace /> },
+          { path: "queue", element: <QueueSection /> },
+          { path: "history", element: <HistorySection /> },
+        ],
+      },
       {
         path: "settings",
         element: <SettingsLayout />,
