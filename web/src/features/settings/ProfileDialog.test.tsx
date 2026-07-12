@@ -12,8 +12,8 @@ vi.mock("./qualityApi", async (orig) => {
 beforeEach(() => vi.clearAllMocks())
 
 const defs = [
-  { id: 6, name: "WEBDL-720p", source: "webdl", resolution: "720p", rank: 1 },
-  { id: 7, name: "WEBDL-1080p", source: "webdl", resolution: "1080p", rank: 2 },
+  { id: 6, name: "WEBDL-720p", source: 6, resolution: 2, rank: 1 },
+  { id: 7, name: "WEBDL-1080p", source: 6, resolution: 3, rank: 2 },
 ]
 
 function saveMut(mutate = vi.fn()) {

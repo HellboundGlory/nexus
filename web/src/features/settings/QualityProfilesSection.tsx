@@ -46,7 +46,6 @@ export function QualityProfilesSection() {
       ) : (
         <ul className="flex flex-col gap-2">
           {rows.map((p) => {
-            const cutoff = p.items.find((it) => it.qualityId === p.cutoffQualityId)
             const allowedCount = p.items.filter((it) => it.allowed).length
             return (
               <li
@@ -57,7 +56,6 @@ export function QualityProfilesSection() {
                   <div className="font-medium">{p.name}</div>
                   <div className="text-xs text-[var(--color-muted)]">
                     {allowedCount} qualities · cutoff #{p.cutoffQualityId} · upgrades {p.upgradeAllowed ? "on" : "off"}
-                    {cutoff ? "" : ""}
                   </div>
                 </div>
                 <button onClick={() => setEditing(p)} className="rounded-md border border-[var(--color-border)] px-3 py-1.5 text-sm">

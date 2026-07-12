@@ -1,8 +1,8 @@
 export type QualityDefinition = {
   id: number
   name: string
-  source: string
-  resolution: string
+  source: number
+  resolution: number
   rank: number
 }
 

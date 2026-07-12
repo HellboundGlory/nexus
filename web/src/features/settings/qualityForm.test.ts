@@ -6,9 +6,9 @@ import {
 import type { QualityDefinition, QualityProfile } from "./qualityTypes"
 
 const defs: QualityDefinition[] = [
-  { id: 0, name: "Unknown", source: "unknown", resolution: "unknown", rank: 0 },
-  { id: 6, name: "WEBDL-720p", source: "webdl", resolution: "720p", rank: 1 },
-  { id: 7, name: "WEBDL-1080p", source: "webdl", resolution: "1080p", rank: 2 },
+  { id: 0, name: "Unknown", source: 0, resolution: 0, rank: 0 },
+  { id: 6, name: "WEBDL-720p", source: 6, resolution: 2, rank: 1 },
+  { id: 7, name: "WEBDL-1080p", source: 6, resolution: 3, rank: 2 },
 ]
 
 describe("qualityForm", () => {
@@ -73,5 +73,20 @@ describe("qualityForm", () => {
     expect(d.name).toBe("")
     expect(isProfileFormValid(d)).toBe(false) // empty name
     expect(isProfileFormValid({ ...d, name: "HD" })).toBe(true) // allowed+cutoff are valid
+  })
+
+  it("default new profile allows 480p/720p/1080p but not 2160p, cutting off at the highest allowed", () => {
+    const ladder: QualityDefinition[] = [
+      { id: 1, name: "SDTV", source: 4, resolution: 1, rank: 1 },
+      { id: 5, name: "HDTV-720p", source: 4, resolution: 2, rank: 2 },
+      { id: 7, name: "WEBDL-1080p", source: 6, resolution: 3, rank: 3 },
+      { id: 12, name: "Bluray-2160p", source: 7, resolution: 4, rank: 4 },
+    ]
+    const d = defaultNewProfile(ladder)
+    expect(d.allowed[1]).toBe(true)
+    expect(d.allowed[5]).toBe(true)
+    expect(d.allowed[7]).toBe(true)
+    expect(d.allowed[12]).toBeFalsy()
+    expect(d.cutoffQualityId).toBe(7)
   })
 })

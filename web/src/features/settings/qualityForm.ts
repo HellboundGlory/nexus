@@ -53,10 +53,12 @@ export function formStateFromProfile(p: QualityProfile, defs: QualityDefinition[
 // A sensible baseline: allow every 1080p-and-below WEBDL/Bluray/HDTV/SDTV
 // quality, cutoff at the highest allowed, upgrades on. Falls back gracefully
 // for an unexpected ladder.
+// Definitions use numeric resolution enums: Res480p=1, Res720p=2, Res1080p=3
+// (Res2160p=4 is intentionally excluded from the default ladder).
 export function defaultNewProfile(defs: QualityDefinition[]): ProfileFormState {
   const allowed: Record<number, boolean> = {}
   for (const d of defs) {
-    allowed[d.id] = d.resolution === "480p" || d.resolution === "720p" || d.resolution === "1080p"
+    allowed[d.id] = d.resolution === 1 || d.resolution === 2 || d.resolution === 3
   }
   if (!Object.values(allowed).some(Boolean) && defs.length > 0) {
     // Unexpected ladder — allow the single highest so the form is valid.
