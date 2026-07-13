@@ -167,10 +167,18 @@ func (c *QBittorrentClient) Add(ctx context.Context, d provider.DownloadRequest)
 		return "", err
 	}
 	// qBittorrent's add endpoint returns no id; the torrent hash is the identity.
-	// For magnets, derive it from the btih; for .torrent files it is not known here
-	// (the queue monitor will surface the item by name/hash).
+	// For magnets, derive it from the btih. For .torrent files, compute the v1
+	// infohash locally (SHA-1 of the bencoded info dict) — it equals the hash qBit
+	// reports, so the import pipeline can attribute the download to its queue row.
 	if m := btihRe.FindStringSubmatch(d.URL); m != nil {
 		return strings.ToLower(m[1]), nil
+	}
+	if len(d.Content) > 0 {
+		if h, err := torrentInfoHash(d.Content); err == nil {
+			return h, nil
+		}
+		// Unparseable .torrent: fall back to an empty id (prior behavior); the
+		// download still runs and the queue monitor surfaces it by hash.
 	}
 	return "", nil
 }
