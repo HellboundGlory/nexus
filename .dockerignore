@@ -1,0 +1,26 @@
+# VCS / CI / tooling
+.git
+.github
+.gitignore
+.claude
+.superpowers
+
+# Node — the image build uses the committed web/dist, never node_modules
+node_modules
+web/node_modules
+
+# Local runtime state / test servers / built binaries
+data
+.server
+*.exe
+nexus
+
+# Local-only docs & scratch (docs/docker.md is needed? no — image doesn't read docs)
+docs/superpowers
+
+# Editor / OS cruft
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+run-nexus.bat

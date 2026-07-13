@@ -130,6 +130,22 @@ written to the log. If `NEXUS_API_KEY` is not set, a random API key is generated
 startup. TMDb-backed metadata lookups require `NEXUS_TMDB_API_KEY` (a TMDb v3 key) — the
 Add-media search returns nothing until it is set.
 
+### Docker
+
+Prebuilt multi-arch images (`linux/amd64`, `linux/arm64`) are published to GHCR:
+
+```bash
+docker run -d --name nexus -p 9494:9494 \
+  -e NEXUS_ADMIN_PASSWORD=change-me \
+  -e NEXUS_TMDB_API_KEY=your-tmdb-v3-key \
+  -v nexus-data:/data \
+  ghcr.io/hellboundglory/nexus:latest
+```
+
+Or use the example [`docker-compose.yml`](docker-compose.yml) with a `.env` (copy
+from [`.env.example`](.env.example)). Full instructions, the environment-variable
+reference, and volume-permission notes are in [docs/docker.md](docs/docker.md).
+
 ### Web UI development
 
 ```bash

@@ -1,0 +1,41 @@
+# Example Compose file for running Nexus.
+#
+#   1. Copy .env.example to .env and fill in the values (at minimum a TMDb key
+#      and an admin password for the first run).
+#   2. docker compose up -d
+#   3. Open http://localhost:9494/ and log in as admin.
+#
+# See docs/docker.md for the full environment-variable reference.
+
+services:
+  nexus:
+    image: ghcr.io/hellboundglory/nexus:latest
+    container_name: nexus
+    restart: unless-stopped
+    ports:
+      - "9494:9494"
+    environment:
+      # First-run only: seeds the initial admin account. Ignored once the DB
+      # already has a user. Leave ADMIN_PASSWORD unset to get a random password
+      # printed once in the logs.
+      NEXUS_ADMIN_USER: ${NEXUS_ADMIN_USER:-admin}
+      NEXUS_ADMIN_PASSWORD: ${NEXUS_ADMIN_PASSWORD:-}
+      # Metadata provider (TMDb v3 API key). Without it, Add-media search is
+      # disabled. Write-only: never serialized back to clients.
+      NEXUS_TMDB_API_KEY: ${NEXUS_TMDB_API_KEY:-}
+      # Optional: stable API key (otherwise a random one is generated per start).
+      NEXUS_API_KEY: ${NEXUS_API_KEY:-}
+      # Optional: reverse-proxy subpath (e.g. /nexus) and log level.
+      NEXUS_URL_BASE: ${NEXUS_URL_BASE:-}
+      NEXUS_LOG_LEVEL: ${NEXUS_LOG_LEVEL:-info}
+    volumes:
+      # Named volume: adopts the image's nonroot (uid 65532) ownership of /data,
+      # so it is writable out of the box. To use a host bind-mount instead:
+      #   volumes:
+      #     - ./data:/data
+      # first `chown 65532:65532 ./data` on the host (or add `user: "0:0"` to
+      # run as root — less secure).
+      - nexus-data:/data
+
+volumes:
+  nexus-data:

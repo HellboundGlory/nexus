@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -38,12 +39,45 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
+		os.Exit(healthcheck())
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if err := run(ctx); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		slog.Error("fatal", "err", err)
 		os.Exit(1)
 	}
+}
+
+// healthcheck performs a one-shot GET of the local /health endpoint and returns
+// a process exit code (0 healthy, 1 unhealthy). It exists so the container image
+// can define a HEALTHCHECK without a shell or curl (the distroless base has
+// neither). It honours NEXUS_PORT so it matches the running server's listener.
+func healthcheck() int {
+	port := 9494
+	if v := os.Getenv("NEXUS_PORT"); v != "" {
+		p, err := strconv.Atoi(v)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "healthcheck: invalid NEXUS_PORT %q: %v\n", v, err)
+			return 1
+		}
+		port = p
+	}
+	client := &http.Client{Timeout: 5 * time.Second}
+	url := fmt.Sprintf("http://127.0.0.1:%d/health", port)
+	resp, err := client.Get(url)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "healthcheck: %v\n", err)
+		return 1
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		fmt.Fprintf(os.Stderr, "healthcheck: status %d\n", resp.StatusCode)
+		return 1
+	}
+	return 0
 }
 
 func run(ctx context.Context) error {
