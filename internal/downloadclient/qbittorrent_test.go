@@ -2,6 +2,8 @@ package downloadclient
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -125,7 +127,49 @@ func TestQBittorrentAuthFailure(t *testing.T) {
 	srv := newQBitServer(t)
 	defer srv.Close()
 	c := newQBittorrent("2", srv.URL, "admin", "WRONG", "movies", srv.Client())
-	if err := c.Test(context.Background()); err == nil {
-		t.Fatal("expected auth failure")
+	err := c.Test(context.Background())
+	if !errors.Is(err, ErrAuthFailed) {
+		t.Fatalf("want ErrAuthFailed, got %v", err)
+	}
+}
+
+// A 403 on a body-less request means the session expired: send() must re-login
+// once and retry, transparently succeeding. This is the most subtle mandated
+// behavior in the qBittorrent client.
+func TestQBittorrentReloginRetryOn403(t *testing.T) {
+	info, _ := os.ReadFile("testdata/qbit_info.json")
+	var logins, infoCalls int
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v2/auth/login", func(w http.ResponseWriter, _ *http.Request) {
+		logins++
+		http.SetCookie(w, &http.Cookie{Name: "SID", Value: fmt.Sprintf("sid-%d", logins)})
+		_, _ = w.Write([]byte("Ok."))
+	})
+	mux.HandleFunc("/api/v2/torrents/info", func(w http.ResponseWriter, _ *http.Request) {
+		infoCalls++
+		if infoCalls == 1 {
+			// First hit: pretend the initial session expired.
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(info)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	c := newQBittorrent("2", srv.URL, "admin", "pw", "movies", srv.Client())
+
+	items, err := c.Items(context.Background())
+	if err != nil {
+		t.Fatalf("Items after relogin: %v", err)
+	}
+	if len(items) != 3 {
+		t.Fatalf("want 3 items after relogin, got %d", len(items))
+	}
+	if logins != 2 {
+		t.Fatalf("want 2 logins (initial + relogin), got %d", logins)
+	}
+	if infoCalls != 2 {
+		t.Fatalf("want 2 info calls (403 then retry), got %d", infoCalls)
 	}
 }

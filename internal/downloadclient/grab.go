@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 )
 
@@ -17,6 +18,17 @@ const maxContentBytes = 32 << 20 // 32 MiB cap on .nzb/.torrent downloads
 func fetchContent(ctx context.Context, hc *http.Client, rawURL string) ([]byte, error) {
 	if strings.HasPrefix(strings.ToLower(rawURL), "magnet:") {
 		return nil, nil
+	}
+	// Only fetch over http(s). A stored/indexer-supplied URL with any other scheme
+	// (file://, gopher://, …) is rejected before we ever issue a request.
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrReleaseUnavailable, err)
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "http", "https":
+	default:
+		return nil, fmt.Errorf("%w: unsupported url scheme %q", ErrReleaseUnavailable, u.Scheme)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {

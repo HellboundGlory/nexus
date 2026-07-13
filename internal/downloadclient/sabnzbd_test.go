@@ -2,6 +2,7 @@ package downloadclient
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -100,7 +101,7 @@ func TestSABnzbdAuthFailure(t *testing.T) {
 	srv := newSABServer(t)
 	defer srv.Close()
 	c := newSABnzbd("1", srv.URL, "WRONG", "tv", srv.Client())
-	if err := c.Test(context.Background()); err == nil {
-		t.Fatal("expected auth failure")
+	if err := c.Test(context.Background()); !errors.Is(err, ErrAuthFailed) {
+		t.Fatalf("want ErrAuthFailed, got %v", err)
 	}
 }

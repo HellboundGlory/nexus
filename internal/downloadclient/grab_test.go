@@ -33,6 +33,20 @@ func TestFetchContentDownloadsBytes(t *testing.T) {
 	}
 }
 
+func TestFetchContentRejectsNonHTTPScheme(t *testing.T) {
+	// A non-http(s) URL must be rejected before any request is issued. A file://
+	// URL that would otherwise resolve to a readable path is a good probe.
+	for _, raw := range []string{"file:///etc/passwd", "gopher://example.com/", "ftp://example.com/x"} {
+		body, err := fetchContent(context.Background(), http.DefaultClient, raw)
+		if !errors.Is(err, ErrReleaseUnavailable) {
+			t.Fatalf("%s: want ErrReleaseUnavailable, got %v", raw, err)
+		}
+		if body != nil {
+			t.Fatalf("%s: expected no body, got %d bytes", raw, len(body))
+		}
+	}
+}
+
 func TestFetchContentGoneIsReleaseUnavailable(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNotFound)

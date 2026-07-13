@@ -7,6 +7,7 @@ package downloadclient
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"sync"
@@ -62,6 +63,9 @@ func (s *Service) Reload(ctx context.Context) error {
 			clients = append(clients, newSABnzbd(id, base, dc.APIKey, dc.Category, s.http))
 		case "qbittorrent":
 			clients = append(clients, newQBittorrent(id, base, dc.Username, dc.APIKey, dc.Category, s.http))
+		default:
+			slog.Warn("downloadclient: unknown implementation, skipping",
+				"implementation", dc.Implementation, "id", id)
 		}
 	}
 	s.mu.Lock()

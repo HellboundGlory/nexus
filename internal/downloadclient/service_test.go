@@ -1,11 +1,14 @@
 package downloadclient
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/hellboundg/nexus/internal/core/database"
@@ -35,6 +38,34 @@ func hostPort(t *testing.T, raw string) (string, int) {
 	}
 	p, _ := strconv.Atoi(u.Port())
 	return u.Hostname(), p
+}
+
+func TestServiceReloadSkipsUnknownImplementation(t *testing.T) {
+	// Capture slog output to assert the unknown-impl warning fires.
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	defer slog.SetDefault(prev)
+
+	st := newTestStore(t)
+	ctx := context.Background()
+	if _, err := st.CreateDownloadClient(ctx, store.DownloadClient{
+		Name: "weird", Implementation: "transmission", Protocol: "torrent",
+		Host: "127.0.0.1", Port: 9091, Enabled: true, Priority: 5,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := NewService(st)
+	if err := svc.Reload(ctx); err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if got := svc.snapshot(); len(got) != 0 {
+		t.Fatalf("unknown implementation should be skipped, got %d clients", len(got))
+	}
+	if log := buf.String(); !strings.Contains(log, "unknown implementation") || !strings.Contains(log, "transmission") {
+		t.Fatalf("expected unknown-impl warning, log = %q", log)
+	}
 }
 
 func TestServiceReloadGrabQueue(t *testing.T) {
