@@ -164,6 +164,14 @@ func TestCalendarQueries(t *testing.T) {
 		{SeriesID: sid, SeasonNumber: 1, EpisodeNumber: 4, Title: "NoDate", AirDate: "", Monitored: true},
 		{SeriesID: sid, SeasonNumber: 1, EpisodeNumber: 5, Title: "Unmon", AirDate: "2026-07-15", Monitored: false},
 		{SeriesID: unmon, SeasonNumber: 1, EpisodeNumber: 1, Title: "HiddenSeries", AirDate: "2026-07-15", Monitored: true},
+		// Same-series, same-day double-header, inserted out of episode order
+		// (E07 before E06) to prove the result orders by episode number, not
+		// insertion/rowid order. E06/E07 (not E05) to avoid colliding with the
+		// existing sid/S01E05 "Unmon" row above (UpsertEpisode's ON CONFLICT
+		// does not reset monitored, so reusing E05 would silently leave it
+		// unmonitored and filtered out).
+		{SeriesID: sid, SeasonNumber: 1, EpisodeNumber: 7, Title: "DoubleHeaderB", AirDate: "2026-07-25", Monitored: true},
+		{SeriesID: sid, SeasonNumber: 1, EpisodeNumber: 6, Title: "DoubleHeaderA", AirDate: "2026-07-25", Monitored: true},
 	}
 	for _, e := range eps {
 		if err := s.UpsertEpisode(ctx, e); err != nil {
@@ -175,14 +183,20 @@ func TestCalendarQueries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 2 {
-		t.Fatalf("want 2 episodes got %d: %+v", len(got), got)
+	if len(got) != 4 {
+		t.Fatalf("want 4 episodes got %d: %+v", len(got), got)
 	}
-	if got[0].Title != "StartEdge" || got[1].Title != "EndEdge" {
+	if got[0].Title != "StartEdge" || got[3].Title != "EndEdge" {
 		t.Fatalf("order/content: %+v", got)
 	}
 	if got[0].SeriesTitle != "Show" {
 		t.Fatalf("series title join: %+v", got[0])
+	}
+	// Same-day double-header must be ordered by episode_number (E06 before
+	// E07), not by insertion order (E07 was inserted first above).
+	if got[1].Title != "DoubleHeaderA" || got[1].EpisodeNumber != 6 ||
+		got[2].Title != "DoubleHeaderB" || got[2].EpisodeNumber != 7 {
+		t.Fatalf("same-day episode order: %+v", got)
 	}
 
 	if _, err := s.CreateMovie(ctx, Movie{TMDBID: 10, Title: "In", SortTitle: "in", Year: 2026, ReleaseDate: "2026-07-20", Monitored: true}); err != nil {

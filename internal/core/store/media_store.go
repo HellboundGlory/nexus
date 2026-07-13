@@ -303,7 +303,7 @@ func (s *Store) CalendarEpisodes(ctx context.Context, start, end string) ([]Cale
 		FROM episodes e JOIN series s ON e.series_id = s.id
 		WHERE s.monitored = 1 AND e.monitored = 1
 		  AND e.air_date >= ? AND e.air_date <= ?
-		ORDER BY e.air_date, s.sort_title`, start, end)
+		ORDER BY e.air_date, s.sort_title, e.season_number, e.episode_number`, start, end)
 	if err != nil {
 		return nil, err
 	}

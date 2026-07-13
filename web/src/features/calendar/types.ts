@@ -9,7 +9,7 @@ export type CalendarEntry =
       seriesTitle: string
       seasonNumber: number
       episodeNumber: number
-      episodeTitle: string
+      episodeTitle?: string
     }
   | {
       type: "movie"
