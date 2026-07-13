@@ -36,8 +36,6 @@ func (a *API) Mount(r chi.Router) {
 		r.Post("/{id}/test", a.testSaved)
 	})
 	r.Post("/download", a.grab)
-	r.Get("/queue", a.queue)
-	r.Delete("/queue/{clientId}/{itemId}", a.removeItem)
 }
 
 type clientPayload struct {
@@ -314,28 +312,6 @@ func writeGrabError(w http.ResponseWriter, err error) {
 	default:
 		api.WriteError(w, http.StatusInternalServerError, "internal", err.Error())
 	}
-}
-
-func (a *API) queue(w http.ResponseWriter, r *http.Request) {
-	res := a.svc.Queue(r.Context())
-	if res.Items == nil {
-		res.Items = []provider.DownloadItem{}
-	}
-	if res.ClientErrors == nil {
-		res.ClientErrors = []ClientError{}
-	}
-	api.WriteJSON(w, http.StatusOK, res)
-}
-
-func (a *API) removeItem(w http.ResponseWriter, r *http.Request) {
-	clientID := chi.URLParam(r, "clientId")
-	itemID := chi.URLParam(r, "itemId")
-	deleteData := r.URL.Query().Get("deleteData") == "true"
-	if err := a.svc.Remove(r.Context(), clientID, itemID, deleteData); err != nil {
-		api.WriteError(w, http.StatusBadRequest, "remove_failed", err.Error())
-		return
-	}
-	api.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 func parseID(w http.ResponseWriter, r *http.Request, name string) (int64, bool) {

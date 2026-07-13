@@ -70,27 +70,6 @@ func TestDownloadClientAPICreateListGrabQueue(t *testing.T) {
 	if gres.ID != "SABnzbd_nzo_new" {
 		t.Fatalf("grab id = %q", gres.ID)
 	}
-
-	// Queue.
-	rec = httptest.NewRecorder()
-	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/queue", nil))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("queue: %d", rec.Code)
-	}
-	var qres QueueResult
-	if err := json.Unmarshal(rec.Body.Bytes(), &qres); err != nil {
-		t.Fatal(err)
-	}
-	if len(qres.Items) != 4 {
-		t.Fatalf("queue items = %d want 4", len(qres.Items))
-	}
-
-	// Remove.
-	rec = httptest.NewRecorder()
-	router.ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/api/v1/queue/1/SABnzbd_nzo_aaa", nil))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("remove: %d body=%s", rec.Code, rec.Body.String())
-	}
 }
 
 func TestDownloadClientUpdatePreservesStoredSecretWhenBlank(t *testing.T) {
