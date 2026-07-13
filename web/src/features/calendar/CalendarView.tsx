@@ -50,8 +50,14 @@ export function CalendarView() {
   return (
     <div className="p-6">
       <h1 className="mb-4 text-2xl font-bold">Calendar</h1>
-      {q.isLoading && <p className="text-[var(--color-muted)]">Loading…</p>}
-      {!q.isLoading && days.length === 0 && (
+      {q.isError && (
+        <p className="text-[var(--color-warn)]">
+          Couldn&apos;t load the calendar
+          {q.error instanceof Error ? `: ${q.error.message}` : "."}
+        </p>
+      )}
+      {!q.isError && q.isLoading && <p className="text-[var(--color-muted)]">Loading…</p>}
+      {!q.isError && !q.isLoading && days.length === 0 && (
         <p className="text-[var(--color-muted)]">Nothing scheduled in the next {WINDOW_DAYS} days.</p>
       )}
       <div className="flex flex-col gap-6">

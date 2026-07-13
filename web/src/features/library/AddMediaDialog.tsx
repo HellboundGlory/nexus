@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react"
 import { Dialog, DialogTitle } from "@/components/ui/dialog"
 import { Select } from "@/components/ui/select"
+import { ApiError } from "@/lib/api"
 import { useToast } from "@/lib/toast"
 import {
   useLookup, useRootFolders, useAddMovie, useAddSeries,
@@ -68,6 +69,21 @@ export function AddMediaDialog({
             placeholder="Search TMDb…"
             className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-panel-2)] px-3 py-2 text-sm"
           />
+          {debounced.trim() && lookup.isError && (
+            <p className="mt-3 text-sm text-[var(--color-warn)]">
+              {lookup.error instanceof ApiError && lookup.error.code === "not_configured"
+                ? "Metadata provider not configured — set a TMDb API key on the server."
+                : lookup.error instanceof Error
+                  ? lookup.error.message
+                  : "Search failed."}
+            </p>
+          )}
+          {debounced.trim() && lookup.isLoading && (
+            <p className="mt-3 text-sm text-[var(--color-muted)]">Searching…</p>
+          )}
+          {debounced.trim() && !lookup.isLoading && !lookup.isError && (lookup.data ?? []).length === 0 && (
+            <p className="mt-3 text-sm text-[var(--color-muted)]">No results.</p>
+          )}
           <ul className="mt-3 max-h-72 overflow-auto">
             {(lookup.data ?? []).map((r) => (
               <li key={r.tmdbId}>

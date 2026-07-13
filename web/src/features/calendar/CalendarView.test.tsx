@@ -27,6 +27,13 @@ describe("CalendarView", () => {
     expect(screen.getByText(/nothing scheduled/i)).toBeInTheDocument()
   })
 
+  it("shows an error message (not the empty state) when the query fails", () => {
+    vi.mocked(api.useCalendar).mockReturnValue({ data: undefined, isLoading: false, isError: true, error: new Error("boom") } as never)
+    renderView()
+    expect(screen.getByText(/couldn.t load the calendar/i)).toBeInTheDocument()
+    expect(screen.queryByText(/nothing scheduled/i)).not.toBeInTheDocument()
+  })
+
   it("renders episode and movie rows grouped under Today", () => {
     const now = new Date()
     const iso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`
