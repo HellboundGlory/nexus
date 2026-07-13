@@ -294,11 +294,15 @@ func TestAPICalendar(t *testing.T) {
 	if err := st.UpsertEpisode(ctx, store.Episode{SeriesID: sid, SeasonNumber: 1, EpisodeNumber: 9, Title: "Out", AirDate: "2026-09-01", Monitored: true}); err != nil {
 		t.Fatal(err)
 	}
+	// season-0 special in-window (TMDb Specials); seasonNumber must serialize as 0, not be omitted
+	if err := st.UpsertEpisode(ctx, store.Episode{SeriesID: sid, SeasonNumber: 0, EpisodeNumber: 3, Title: "Special", AirDate: "2026-07-12", Monitored: true}); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := st.CreateMovie(ctx, store.Movie{TMDBID: 2, Title: "Aaa Film", SortTitle: "aaa film", Year: 2026, ReleaseDate: "2026-07-15", Monitored: true}); err != nil {
 		t.Fatal(err)
 	}
 
-	// happy path: two entries in window, episode sorts before movie on the same date
+	// happy path: special (07-12) + episode & movie (07-15); episode sorts before movie same date
 	req := httptest.NewRequest(http.MethodGet, "/calendar?start=2026-07-10&end=2026-07-31", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -309,14 +313,25 @@ func TestAPICalendar(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 2 {
-		t.Fatalf("want 2 entries got %d: %s", len(got), w.Body.String())
+	if len(got) != 3 {
+		t.Fatalf("want 3 entries got %d: %s", len(got), w.Body.String())
 	}
-	if got[0]["type"] != "episode" || got[1]["type"] != "movie" {
-		t.Fatalf("same-day order want episode,movie got %v,%v", got[0]["type"], got[1]["type"])
+	// entries: [0] special 07-12 episode, [1] episode 07-15, [2] movie 07-15
+	if got[1]["type"] != "episode" || got[2]["type"] != "movie" {
+		t.Fatalf("same-day order want episode,movie got %v,%v", got[1]["type"], got[2]["type"])
 	}
-	if got[0]["seriesTitle"] != "Show" {
-		t.Fatalf("seriesTitle: %v", got[0])
+	if got[1]["seriesTitle"] != "Show" {
+		t.Fatalf("seriesTitle: %v", got[1])
+	}
+	// season-0 special: seasonNumber key must be present with value 0 (not omitted)
+	special := got[0]
+	if special["date"] != "2026-07-12" || special["type"] != "episode" {
+		t.Fatalf("first entry should be the special, got %v", special)
+	}
+	if v, ok := special["seasonNumber"]; !ok {
+		t.Fatalf("seasonNumber key missing for season-0 special: %v", special)
+	} else if v != float64(0) {
+		t.Fatalf("seasonNumber want 0 got %v", v)
 	}
 
 	// bad date → 400

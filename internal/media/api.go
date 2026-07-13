@@ -117,8 +117,8 @@ type calendarEntry struct {
 	// episode-only (zero for movies)
 	SeriesID      int64  `json:"seriesId,omitempty"`
 	SeriesTitle   string `json:"seriesTitle,omitempty"`
-	SeasonNumber  int    `json:"seasonNumber,omitempty"`
-	EpisodeNumber int    `json:"episodeNumber,omitempty"`
+	SeasonNumber  int    `json:"seasonNumber"`
+	EpisodeNumber int    `json:"episodeNumber"`
 	EpisodeTitle  string `json:"episodeTitle,omitempty"`
 	// movie-only (zero for episodes)
 	MovieID    int64  `json:"movieId,omitempty"`
