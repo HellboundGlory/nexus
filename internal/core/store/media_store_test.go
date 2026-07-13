@@ -143,3 +143,66 @@ func TestDeleteRootFolderInUseAndMissing(t *testing.T) {
 		t.Fatalf("delete in-use: want ErrRootFolderInUse, got %v", err)
 	}
 }
+
+func TestCalendarQueries(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	sid, err := s.CreateSeries(ctx, Series{TMDBID: 1, Title: "Show", SortTitle: "show", Monitored: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	unmon, err := s.CreateSeries(ctx, Series{TMDBID: 2, Title: "Hidden", SortTitle: "hidden", Monitored: false})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	eps := []Episode{
+		{SeriesID: sid, SeasonNumber: 1, EpisodeNumber: 1, Title: "StartEdge", AirDate: "2026-07-10", Monitored: true},
+		{SeriesID: sid, SeasonNumber: 1, EpisodeNumber: 2, Title: "EndEdge", AirDate: "2026-07-31", Monitored: true},
+		{SeriesID: sid, SeasonNumber: 1, EpisodeNumber: 3, Title: "AfterEnd", AirDate: "2026-08-01", Monitored: true},
+		{SeriesID: sid, SeasonNumber: 1, EpisodeNumber: 4, Title: "NoDate", AirDate: "", Monitored: true},
+		{SeriesID: sid, SeasonNumber: 1, EpisodeNumber: 5, Title: "Unmon", AirDate: "2026-07-15", Monitored: false},
+		{SeriesID: unmon, SeasonNumber: 1, EpisodeNumber: 1, Title: "HiddenSeries", AirDate: "2026-07-15", Monitored: true},
+	}
+	for _, e := range eps {
+		if err := s.UpsertEpisode(ctx, e); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got, err := s.CalendarEpisodes(ctx, "2026-07-10", "2026-07-31")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("want 2 episodes got %d: %+v", len(got), got)
+	}
+	if got[0].Title != "StartEdge" || got[1].Title != "EndEdge" {
+		t.Fatalf("order/content: %+v", got)
+	}
+	if got[0].SeriesTitle != "Show" {
+		t.Fatalf("series title join: %+v", got[0])
+	}
+
+	if _, err := s.CreateMovie(ctx, Movie{TMDBID: 10, Title: "In", SortTitle: "in", Year: 2026, ReleaseDate: "2026-07-20", Monitored: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateMovie(ctx, Movie{TMDBID: 11, Title: "Out", SortTitle: "out", Year: 2026, ReleaseDate: "2026-08-15", Monitored: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateMovie(ctx, Movie{TMDBID: 12, Title: "Unmon", SortTitle: "unmon", Year: 2026, ReleaseDate: "2026-07-20", Monitored: false}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateMovie(ctx, Movie{TMDBID: 13, Title: "NoDate", SortTitle: "nodate", Year: 2026, ReleaseDate: "", Monitored: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	gm, err := s.CalendarMovies(ctx, "2026-07-10", "2026-07-31")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(gm) != 1 || gm[0].Title != "In" {
+		t.Fatalf("want 1 movie In got %+v", gm)
+	}
+}
