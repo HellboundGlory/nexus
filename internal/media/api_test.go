@@ -278,3 +278,60 @@ func mustJSON(t *testing.T, body string, v any) {
 		t.Fatalf("json: %v body=%s", err, body)
 	}
 }
+
+func TestAPICalendar(t *testing.T) {
+	fp := &fakeProvider{}
+	r, st := newTestAPI(t, fp)
+	ctx := context.Background()
+
+	sid, err := st.CreateSeries(ctx, store.Series{TMDBID: 1, Title: "Show", SortTitle: "show", Monitored: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertEpisode(ctx, store.Episode{SeriesID: sid, SeasonNumber: 1, EpisodeNumber: 2, Title: "Two", AirDate: "2026-07-15", Monitored: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertEpisode(ctx, store.Episode{SeriesID: sid, SeasonNumber: 1, EpisodeNumber: 9, Title: "Out", AirDate: "2026-09-01", Monitored: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.CreateMovie(ctx, store.Movie{TMDBID: 2, Title: "Aaa Film", SortTitle: "aaa film", Year: 2026, ReleaseDate: "2026-07-15", Monitored: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	// happy path: two entries in window, episode sorts before movie on the same date
+	req := httptest.NewRequest(http.MethodGet, "/calendar?start=2026-07-10&end=2026-07-31", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	var got []map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("want 2 entries got %d: %s", len(got), w.Body.String())
+	}
+	if got[0]["type"] != "episode" || got[1]["type"] != "movie" {
+		t.Fatalf("same-day order want episode,movie got %v,%v", got[0]["type"], got[1]["type"])
+	}
+	if got[0]["seriesTitle"] != "Show" {
+		t.Fatalf("seriesTitle: %v", got[0])
+	}
+
+	// bad date → 400
+	req = httptest.NewRequest(http.MethodGet, "/calendar?start=nope&end=2026-07-31", nil)
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("bad start status=%d want 400", w.Code)
+	}
+
+	// empty window → [] (never null)
+	req = httptest.NewRequest(http.MethodGet, "/calendar?start=2030-01-01&end=2030-01-02", nil)
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if strings.TrimSpace(w.Body.String()) != "[]" {
+		t.Fatalf("empty window body=%q want []", w.Body.String())
+	}
+}
