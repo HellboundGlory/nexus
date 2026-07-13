@@ -23,6 +23,34 @@ func mountedRouter(t *testing.T, svc *Service, a *API) http.Handler {
 	return r
 }
 
+func TestIndexerAPINegativePaths(t *testing.T) {
+	st := newTestStore(t)
+	svc := NewService(st)
+	a := NewAPI(st, svc, http.DefaultClient)
+	router := mountedRouter(t, svc, a)
+
+	// GET a non-existent indexer → 404.
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/indexer/999", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("get missing: %d want 404 body=%s", rec.Code, rec.Body.String())
+	}
+
+	// GET with a non-numeric id → 400.
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/indexer/abc", nil))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("get bad id: %d want 400", rec.Code)
+	}
+
+	// GET the schema (static route must win over /{id}) → 200.
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/indexer/schema", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("schema: %d want 200 body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestIndexerAPICreateAndSearch(t *testing.T) {
 	body, _ := os.ReadFile("testdata/torznab_search.xml")
 	caps, _ := os.ReadFile("testdata/caps.xml")

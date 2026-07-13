@@ -1,8 +1,11 @@
 package quality
 
 import (
+	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -10,6 +13,25 @@ import (
 	"github.com/hellboundg/nexus/internal/core/database"
 	"github.com/hellboundg/nexus/internal/core/store"
 )
+
+// seedProfile creates a valid quality profile via the API and returns its id.
+func seedProfile(t *testing.T, r http.Handler) int64 {
+	t.Helper()
+	good := `{"name":"HD","cutoffQualityId":9,"upgradeAllowed":true,"items":[{"qualityId":7,"allowed":true},{"qualityId":9,"allowed":true}]}`
+	req := httptest.NewRequest(http.MethodPost, "/qualityprofile", strings.NewReader(good))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("seed profile status=%d body=%s", w.Code, w.Body.String())
+	}
+	var out struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil || out.ID == 0 {
+		t.Fatalf("seed profile id: err=%v body=%s", err, w.Body.String())
+	}
+	return out.ID
+}
 
 func newTestAPI(t *testing.T) (http.Handler, *store.Store) {
 	t.Helper()
@@ -70,5 +92,42 @@ func TestAPIParsePreview(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), "Bluray-1080p") {
 		t.Fatalf("parse body missing resolved quality: %s", w.Body.String())
+	}
+}
+
+func TestAPIParseWithProfileReturnsDecision(t *testing.T) {
+	r, _ := newTestAPI(t)
+	pid := seedProfile(t, r)
+	body := `{"title":"Show.S01E01.1080p.BluRay.x264-GRP","kind":"tv","profileId":` + strconv.FormatInt(pid, 10) + `}`
+	req := httptest.NewRequest(http.MethodPost, "/parse", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("parse status=%d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "decision") {
+		t.Fatalf("parse with profileId should include a decision: %s", w.Body.String())
+	}
+}
+
+func TestAPIDeleteProfileInUseIs409(t *testing.T) {
+	r, st := newTestAPI(t)
+	ctx := context.Background()
+	pid := seedProfile(t, r)
+
+	// Reference the profile from a series so the delete is blocked.
+	sid, err := st.CreateSeries(ctx, store.Series{TMDBID: 42, Title: "Ref", SortTitle: "ref"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetSeriesQualityProfileID(ctx, sid, &pid); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodDelete, "/qualityprofile/"+strconv.FormatInt(pid, 10), nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("delete in-use status=%d want 409 body=%s", w.Code, w.Body.String())
 	}
 }
