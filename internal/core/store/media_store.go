@@ -286,6 +286,42 @@ func (s *Store) SetSeriesEpisodesMonitored(ctx context.Context, seriesID int64, 
 	return err
 }
 
+// CalendarEpisode is an episode joined to its parent series title, for the
+// calendar view (episodes carry no series title of their own).
+type CalendarEpisode struct {
+	Episode
+	SeriesTitle string `json:"seriesTitle"`
+}
+
+// CalendarEpisodes returns monitored episodes of monitored series whose air_date
+// falls within [start, end] inclusive. Dates are "YYYY-MM-DD" strings compared
+// lexically; empty air_date rows fall below any start bound and are excluded.
+func (s *Store) CalendarEpisodes(ctx context.Context, start, end string) ([]CalendarEpisode, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT e.id, e.series_id, e.season_number, e.episode_number, e.tmdb_id,
+		       e.title, e.overview, e.air_date, e.monitored, s.title
+		FROM episodes e JOIN series s ON e.series_id = s.id
+		WHERE s.monitored = 1 AND e.monitored = 1
+		  AND e.air_date >= ? AND e.air_date <= ?
+		ORDER BY e.air_date, s.sort_title, e.season_number, e.episode_number`, start, end)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []CalendarEpisode
+	for rows.Next() {
+		var c CalendarEpisode
+		var m int
+		if err := rows.Scan(&c.ID, &c.SeriesID, &c.SeasonNumber, &c.EpisodeNumber, &c.TMDBID,
+			&c.Title, &c.Overview, &c.AirDate, &m, &c.SeriesTitle); err != nil {
+			return nil, err
+		}
+		c.Monitored = m != 0
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
 type Movie struct {
 	ID               int64      `json:"id"`
 	TMDBID           int        `json:"tmdbId"`
@@ -357,6 +393,28 @@ func (s *Store) GetMovie(ctx context.Context, id int64) (*Movie, error) {
 
 func (s *Store) ListMovies(ctx context.Context) ([]Movie, error) {
 	rows, err := s.db.QueryContext(ctx, movieSelect+` ORDER BY sort_title ASC, id ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Movie
+	for rows.Next() {
+		m, err := scanMovieRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *m)
+	}
+	return out, rows.Err()
+}
+
+// CalendarMovies returns monitored movies whose release_date falls within
+// [start, end] inclusive, ordered by release_date then sort_title. Empty
+// release_date rows are excluded by the >= start bound.
+func (s *Store) CalendarMovies(ctx context.Context, start, end string) ([]Movie, error) {
+	rows, err := s.db.QueryContext(ctx, movieSelect+`
+		WHERE monitored = 1 AND release_date >= ? AND release_date <= ?
+		ORDER BY release_date, sort_title`, start, end)
 	if err != nil {
 		return nil, err
 	}

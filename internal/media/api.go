@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"sort"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -23,6 +25,7 @@ func NewAPI(st *store.Store, svc *Service) *API { return &API{store: st, svc: sv
 // Mount registers routes on an already-authenticated router (the /api/v1 group).
 func (a *API) Mount(r chi.Router) {
 	r.Get("/media/lookup", a.lookup)
+	r.Get("/calendar", a.calendar)
 
 	r.Route("/series", func(r chi.Router) {
 		r.Get("/", a.listSeries)
@@ -105,6 +108,89 @@ func (a *API) lookup(w http.ResponseWriter, r *http.Request) {
 		res = []provider.MetadataResult{}
 	}
 	api.WriteJSON(w, http.StatusOK, res)
+}
+
+type calendarEntry struct {
+	Type    string `json:"type"` // "episode" | "movie" — MUST match TS CalendarEntry
+	Date    string `json:"date"` // air_date or release_date, "YYYY-MM-DD"
+	HasFile bool   `json:"hasFile"`
+	// episode-only (zero for movies)
+	SeriesID      int64  `json:"seriesId,omitempty"`
+	SeriesTitle   string `json:"seriesTitle,omitempty"`
+	SeasonNumber  int    `json:"seasonNumber"`
+	EpisodeNumber int    `json:"episodeNumber"`
+	EpisodeTitle  string `json:"episodeTitle,omitempty"`
+	// movie-only (zero for episodes)
+	MovieID    int64  `json:"movieId,omitempty"`
+	MovieTitle string `json:"movieTitle,omitempty"`
+	Year       int    `json:"year,omitempty"`
+}
+
+func validDate(s string) bool {
+	_, err := time.Parse("2006-01-02", s)
+	return err == nil
+}
+
+func entryTitle(e calendarEntry) string {
+	if e.Type == "episode" {
+		return e.SeriesTitle
+	}
+	return e.MovieTitle
+}
+
+func (a *API) calendar(w http.ResponseWriter, r *http.Request) {
+	start := r.URL.Query().Get("start")
+	end := r.URL.Query().Get("end")
+	if !validDate(start) || !validDate(end) {
+		api.WriteError(w, http.StatusBadRequest, "bad_request", "start and end must be YYYY-MM-DD")
+		return
+	}
+	eps, err := a.store.CalendarEpisodes(r.Context(), start, end)
+	if err != nil {
+		api.WriteError(w, http.StatusInternalServerError, "internal", "failed to load calendar")
+		return
+	}
+	movies, err := a.store.CalendarMovies(r.Context(), start, end)
+	if err != nil {
+		api.WriteError(w, http.StatusInternalServerError, "internal", "failed to load calendar")
+		return
+	}
+	epFiles, err := a.store.EpisodeFileIDs(r.Context())
+	if err != nil {
+		api.WriteError(w, http.StatusInternalServerError, "internal", "failed to load calendar")
+		return
+	}
+	movFiles, err := a.store.MovieFileIDs(r.Context())
+	if err != nil {
+		api.WriteError(w, http.StatusInternalServerError, "internal", "failed to load calendar")
+		return
+	}
+	out := make([]calendarEntry, 0, len(eps)+len(movies))
+	for _, e := range eps {
+		out = append(out, calendarEntry{
+			Type: "episode", Date: e.AirDate, HasFile: epFiles[e.ID],
+			SeriesID: e.SeriesID, SeriesTitle: e.SeriesTitle,
+			SeasonNumber: e.SeasonNumber, EpisodeNumber: e.EpisodeNumber, EpisodeTitle: e.Title,
+		})
+	}
+	for _, m := range movies {
+		out = append(out, calendarEntry{
+			Type: "movie", Date: m.ReleaseDate, HasFile: movFiles[m.ID],
+			MovieID: m.ID, MovieTitle: m.Title, Year: m.Year,
+		})
+	}
+	// date, then type ("episode" < "movie"), then display title — deterministic
+	// same-day order across both entry kinds.
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Date != out[j].Date {
+			return out[i].Date < out[j].Date
+		}
+		if out[i].Type != out[j].Type {
+			return out[i].Type < out[j].Type
+		}
+		return entryTitle(out[i]) < entryTitle(out[j])
+	})
+	api.WriteJSON(w, http.StatusOK, out)
 }
 
 type addSeriesBody struct {
