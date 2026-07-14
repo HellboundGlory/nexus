@@ -56,4 +56,20 @@ describe("AddMediaDialog", () => {
     await userEvent.type(screen.getByPlaceholderText(/search/i), "dune")
     expect(await screen.findByText(/metadata provider not configured/i)).toBeInTheDocument()
   })
+
+  it("renders results as poster tiles and can reorder by sort", async () => {
+    stub()
+    vi.mocked(lib.useRootFolders).mockReturnValue({ data: [] } as unknown as ReturnType<typeof lib.useRootFolders>)
+    render(
+      <ToastProvider>
+        <AddMediaDialog kind="movie" open onOpenChange={() => {}} />
+      </ToastProvider>,
+    )
+    await userEvent.type(screen.getByPlaceholderText(/search/i), "dune")
+    // the result tile shows the title and the year
+    expect(await screen.findByText("Dune")).toBeInTheDocument()
+    expect(screen.getByText("2021")).toBeInTheDocument()
+    // the sort control is present
+    expect(screen.getByLabelText(/sort/i)).toBeInTheDocument()
+  })
 })

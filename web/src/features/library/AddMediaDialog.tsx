@@ -7,6 +7,7 @@ import {
   useLookup, useRootFolders, useAddMovie, useAddSeries,
 } from "./api"
 import type { MetadataResult, MediaKind } from "./types"
+import { sortResults, type AddSort } from "./addSort"
 
 export function AddMediaDialog({
   kind, open, onOpenChange,
@@ -22,6 +23,7 @@ export function AddMediaDialog({
   const [rootFolderId, setRootFolderId] = useState("")
   const [monitorOption, setMonitorOption] = useState<"all" | "future" | "none">("all")
   const [monitored, setMonitored] = useState(true)
+  const [sort, setSort] = useState<AddSort>("relevance")
 
   // simple debounce
   useDebounce(term, 300, setDebounced)
@@ -53,7 +55,7 @@ export function AddMediaDialog({
 
   function reset() {
     setTerm(""); setDebounced(""); setPicked(null); setRootFolderId("")
-    setMonitorOption("all"); setMonitored(true)
+    setMonitorOption("all"); setMonitored(true); setSort("relevance")
   }
 
   return (
@@ -84,19 +86,37 @@ export function AddMediaDialog({
           {debounced.trim() && !lookup.isLoading && !lookup.isError && (lookup.data ?? []).length === 0 && (
             <p className="mt-3 text-sm text-[var(--color-muted)]">No results.</p>
           )}
-          <ul className="mt-3 max-h-72 overflow-auto">
-            {(lookup.data ?? []).map((r) => (
-              <li key={r.tmdbId}>
-                <button
-                  onClick={() => setPicked(r)}
-                  className="flex w-full items-start gap-3 rounded-md p-2 text-left hover:bg-[var(--color-panel-2)]"
-                >
-                  <span className="font-medium">{r.title}</span>
-                  {r.year ? <span className="text-xs text-[var(--color-muted)]">{r.year}</span> : null}
-                </button>
-              </li>
+          {(lookup.data ?? []).length > 0 && (
+            <div className="mt-3 flex items-center gap-2">
+              <span className="text-xs text-[var(--color-muted)]">Sort</span>
+              <Select aria-label="Sort" value={sort} onChange={(v) => setSort(v as AddSort)}>
+                <option value="relevance">Relevance</option>
+                <option value="newest">Newest</option>
+                <option value="oldest">Oldest</option>
+              </Select>
+            </div>
+          )}
+          <div className="mt-3 grid max-h-96 grid-cols-3 gap-3 overflow-auto">
+            {sortResults(lookup.data ?? [], sort).map((rr) => (
+              <button
+                key={rr.tmdbId}
+                onClick={() => setPicked(rr)}
+                className="group flex flex-col overflow-hidden rounded-md border border-[var(--color-border)] text-left hover:border-[var(--color-brand)]"
+              >
+                <div className="aspect-[2/3] w-full bg-[var(--color-panel-2)]">
+                  {rr.posterUrl ? (
+                    <img src={rr.posterUrl} alt={rr.title} className="h-full w-full object-cover" loading="lazy" />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center text-xs text-[var(--color-muted)]">No poster</div>
+                  )}
+                </div>
+                <div className="flex flex-col gap-0.5 p-2">
+                  <span className="truncate text-sm font-medium" title={rr.title}>{rr.title}</span>
+                  {rr.year ? <span className="text-xs text-[var(--color-muted)]">{rr.year}</span> : null}
+                </div>
+              </button>
             ))}
-          </ul>
+          </div>
         </div>
       ) : (
         <div className="flex flex-col gap-3">
