@@ -65,9 +65,9 @@ func TestImportSingleEpisode(t *testing.T) {
 	if _, err := os.Stat(want); err != nil {
 		t.Fatalf("expected imported file at %s: %v", want, err)
 	}
-	updated, _ := st.GetQueueItem(ctx, q.ID)
-	if updated.Status != store.QueueImported {
-		t.Fatalf("status = %q want imported", updated.Status)
+	// queue is transient: the row is deleted on successful import, not marked "imported".
+	if _, err := st.GetQueueItem(ctx, q.ID); err != store.ErrNotFound {
+		t.Fatalf("expected queue row deleted, got %v", err)
 	}
 	hist, _ := st.ListHistory(ctx, 10)
 	if len(hist) == 0 || hist[0].EventType != "imported" {
@@ -196,7 +196,8 @@ func TestImportSeasonPack(t *testing.T) {
 	if mf, _ := st.MediaFileForEpisode(ctx, ep2); mf == nil {
 		t.Fatal("episode 2 not imported")
 	}
-	if updated, _ := st.GetQueueItem(ctx, q.ID); updated.Status != store.QueueImported {
-		t.Fatalf("status = %q want imported", updated.Status)
+	// queue is transient: the row is deleted on successful import, not marked "imported".
+	if _, err := st.GetQueueItem(ctx, q.ID); err != store.ErrNotFound {
+		t.Fatalf("expected queue row deleted, got %v", err)
 	}
 }

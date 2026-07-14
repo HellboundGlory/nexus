@@ -55,7 +55,9 @@ func (s *Service) ImportItem(ctx context.Context, queueID int64) error {
 	if !s.allTargetsHaveFiles(ctx, row, kind) {
 		return s.fail(ctx, row, fmt.Sprintf("incomplete import (%d file(s) placed)", placed))
 	}
-	_ = s.store.SetQueueStatus(ctx, row.ID, store.QueueImported, "")
+	// Queue is transient: the imported row is fully captured by history, so drop
+	// it from the queue (Sonarr parity — completed items live only in History).
+	_ = s.store.DeleteQueueItem(ctx, row.ID)
 	// Remove using the client id the item actually landed on (the queue row may
 	// have been enqueued without an explicit client override).
 	if item.DownloadClientID != "" && item.ID != "" {
