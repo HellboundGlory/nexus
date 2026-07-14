@@ -32,4 +32,19 @@ describe("MediaGrid", () => {
     expect(screen.getByText("card-1")).toBeInTheDocument()
     expect(screen.getByText("card-2")).toBeInTheDocument()
   })
+  it("applies the scale to the grid template columns", () => {
+    render(
+      <MediaGrid
+        items={[{ id: 1 }]}
+        isLoading={false}
+        isError={false}
+        onRetry={() => {}}
+        empty="none"
+        scale={200}
+        renderCard={(it: { id: number }) => <div key={it.id}>card-{it.id}</div>}
+      />,
+    )
+    const grid = screen.getByText("card-1").parentElement as HTMLElement
+    expect(grid.style.gridTemplateColumns).toContain("200px")
+  })
 })
