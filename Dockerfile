@@ -29,10 +29,13 @@ RUN --mount=type=cache,target=/go/pkg/mod \
       -ldflags "-s -w -X github.com/hellboundg/nexus/internal/core/version.value=${VERSION}" \
       -o /out/nexus ./cmd/nexus
 
-# Pre-create an empty /data owned by the nonroot uid. distroless has no shell,
-# so we cannot mkdir/chown in the runtime stage; we build the directory here
-# with the right ownership and COPY it across.
-RUN mkdir -p /data && chown 65532:65532 /data
+# Pre-create an empty /data. distroless has no shell, so we cannot mkdir/chmod
+# in the runtime stage; we build the directory here and COPY it across. Mode
+# 0777 lets the container run as an ARBITRARY uid (e.g. `user: "1000:1000"` so
+# Nexus can write imports into media dirs owned by the host PUID/PGID) while a
+# fresh /data named volume — which adopts this mountpoint's mode — stays
+# writable. Single-tenant isolated volume, so world-writable is acceptable.
+RUN mkdir -p /data && chmod 0777 /data
 
 # ---- runtime stage -------------------------------------------------------
 # distroless/static:nonroot -> no shell, no package manager; includes CA
@@ -42,10 +45,11 @@ FROM gcr.io/distroless/static:nonroot
 
 COPY --from=build /out/nexus /nexus
 
-# Pre-create the data dir owned by the nonroot uid so a fresh named volume
-# mounted at /data inherits writable ownership (the distroless + volume-perms
-# gotcha: an empty named volume adopts the mountpoint's ownership).
-COPY --from=build --chown=65532:65532 /data /data
+# Carry the pre-created /data across with mode 0777 (see build stage). A fresh
+# named volume mounted at /data adopts this mountpoint's ownership+mode, so the
+# DB is writable whether the container runs as the default nonroot uid or as a
+# custom `user:` override.
+COPY --from=build --chown=65532:65532 --chmod=0777 /data /data
 
 ENV NEXUS_DATA_DIR=/data \
     NEXUS_PORT=9494

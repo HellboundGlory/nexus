@@ -71,21 +71,62 @@ input but never serialized back in any API response.
 
 ## Data & volume permissions
 
-The container runs as the non-root user `nonroot` (uid **65532**), and the image
-pre-creates `/data` owned by that uid.
+The container runs as the non-root user `nonroot` (uid **65532**) by default, and
+the image's `/data` directory is mode **0777** so the SQLite DB stays writable
+even if you override the user (see [Downloads & imports](#downloads--imports)).
 
 - **Named volume (recommended):** a fresh named volume inherits the mountpoint's
-  ownership, so `/data` is writable immediately. This is what the example Compose
-  file uses.
-- **Host bind-mount:** an empty host directory is owned by root, so the nonroot
-  process cannot write to it. Fix it on the host first:
+  ownership+mode, so `/data` is writable immediately — as the default uid or any
+  `user:` override. This is what the example Compose file uses.
+- **Host bind-mount:** an empty host directory is owned by root. If you run as
+  the default nonroot uid, fix it first: `mkdir -p ./data && sudo chown
+  65532:65532 ./data`, then mount `./data:/data`.
 
-  ```sh
-  mkdir -p ./data && sudo chown 65532:65532 ./data
-  ```
+> **Changing the user later:** an existing named volume keeps the ownership it
+> was created with. If you switch to `user: "<PUID>:<PGID>"` after the volume
+> already exists and hit DB write errors, recreate it (`docker compose down &&
+> docker volume rm <project>_nexus-data && docker compose up -d`) so it re-adopts
+> the writable mountpoint.
 
-  Then mount `./data:/data`. Alternatively add `user: "0:0"` (Compose) or
-  `--user 0:0` (`docker run`) to run as root — simpler, but less secure.
+## Downloads & imports
+
+When a download finishes, Nexus imports **the file at the path your download
+client reports** (qBittorrent's `content_path` / SABnzbd's `storage`). Two things
+must be true, or you'll see `scan output: … no such file` (the file "doesn't
+exist" even though it does):
+
+1. **Same path, both containers.** Mount your media root into the Nexus container
+   at the *same path* the download client uses. In a typical linuxserver \*arr
+   stack the client mounts `${MEDIA_DIRECTORY}:/media`; give Nexus the identical
+   mount:
+
+   ```yaml
+   nexus:
+     volumes:
+       - nexus-data:/data
+       - ${MEDIA_DIRECTORY}:/media   # same path the download client sees
+   ```
+
+   Then in **Settings → Root Folders** add paths *under that mount* (e.g.
+   `/media/movies`, `/media/tvshows`) so imports land where your media server
+   reads them.
+
+2. **Write permission.** The other \*arr apps and your library files run as your
+   host user (`PUID`/`PGID`). Run Nexus as that same user so it can move imports
+   into the library:
+
+   ```yaml
+   nexus:
+     user: "1000:1000"   # your PUID:PGID
+   ```
+
+   (The `/data` volume stays writable under a custom uid — see above.)
+
+Auto-import runs about once a minute, so a completed download imports on its own;
+the **Import** button in Activity is only needed to retry. If it still fails,
+check that the reported path exists inside the container:
+`docker exec` isn't available on the distroless image, so verify the mount from
+the client side and confirm the two `:/media` paths match exactly.
 
 ## Health
 
