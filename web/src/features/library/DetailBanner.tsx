@@ -20,7 +20,9 @@ export function DetailBanner({
         />
       ) : null}
       {/* darkening gradient so text stays legible and the banner melts into the page */}
-      <div className="absolute inset-0 bg-gradient-to-t from-[var(--color-bg)] via-[var(--color-bg)]/70 to-transparent" />
+      {fanartUrl ? (
+        <div className="absolute inset-0 bg-gradient-to-t from-[var(--color-bg)] via-[var(--color-bg)]/70 to-transparent" />
+      ) : null}
       <div className="relative z-10 flex min-h-[320px] items-end gap-6 p-6">
         {posterUrl ? (
           <div className="aspect-[2/3] w-32 shrink-0 overflow-hidden rounded-lg shadow-lg sm:w-40">

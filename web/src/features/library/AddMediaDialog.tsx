@@ -89,11 +89,13 @@ export function AddMediaDialog({
           {(lookup.data ?? []).length > 0 && (
             <div className="mt-3 flex items-center gap-2">
               <span className="text-xs text-[var(--color-muted)]">Sort</span>
-              <Select aria-label="Sort" value={sort} onChange={(v) => setSort(v as AddSort)}>
-                <option value="relevance">Relevance</option>
-                <option value="newest">Newest</option>
-                <option value="oldest">Oldest</option>
-              </Select>
+              <div className="w-40">
+                <Select aria-label="Sort" value={sort} onChange={(v) => setSort(v as AddSort)}>
+                  <option value="relevance">Relevance</option>
+                  <option value="newest">Newest</option>
+                  <option value="oldest">Oldest</option>
+                </Select>
+              </div>
             </div>
           )}
           <div className="mt-3 grid max-h-96 grid-cols-3 gap-3 overflow-auto">
