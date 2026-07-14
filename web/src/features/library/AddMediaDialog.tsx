@@ -59,7 +59,7 @@ export function AddMediaDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={(o) => { if (!o) reset(); onOpenChange(o) }}>
+    <Dialog open={open} onOpenChange={(o) => { if (!o) reset(); onOpenChange(o) }} className={picked ? "w-[32rem]" : "w-[56rem]"}>
       <DialogTitle>Add {kind === "movie" ? "Movie" : "TV Show"}</DialogTitle>
 
       {!picked ? (
@@ -98,7 +98,7 @@ export function AddMediaDialog({
               </div>
             </div>
           )}
-          <div className="mt-3 grid max-h-96 grid-cols-3 gap-3 overflow-auto">
+          <div className="mt-3 grid max-h-[28rem] grid-cols-5 gap-3 overflow-auto">
             {sortResults(lookup.data ?? [], sort).map((rr) => (
               <button
                 key={rr.tmdbId}

@@ -33,8 +33,12 @@ export function MovieDetail({ id }: { id: number }) {
 
   return (
     <div className="p-6">
-      <button onClick={() => nav("/movies")} className="mb-4 text-sm text-[var(--color-brand)]">← Movies</button>
-      <DetailBanner fanartUrl={m.fanartUrl} posterUrl={m.posterUrl} title={m.title}>
+      <DetailBanner
+        fanartUrl={m.fanartUrl}
+        posterUrl={m.posterUrl}
+        title={m.title}
+        back={<button onClick={() => nav("/movies")} className="text-sm text-[var(--color-brand)]">← Movies</button>}
+      >
         <div className="flex items-center gap-3">
           <h2 className="text-2xl font-bold">{m.title}</h2>
           {m.year ? <span className="text-[var(--color-muted)]">{m.year}</span> : null}
@@ -49,7 +53,10 @@ export function MovieDetail({ id }: { id: number }) {
             {m.monitored ? "Unmonitor" : "Monitor"}
           </button>
           <button
-            onClick={() => { search.mutate({ kind: "movie", id }); toast(`Search started for ${m.title}`) }}
+            onClick={() => {
+              if (!m.qualityProfileId) { toast("Assign a quality profile before searching", { variant: "error" }); return }
+              search.mutate({ kind: "movie", id }); toast(`Search started for ${m.title}`)
+            }}
             className="rounded-md border border-[var(--color-border)] px-3 py-1.5 text-sm"
           >
             Search
