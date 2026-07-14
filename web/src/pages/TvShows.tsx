@@ -4,11 +4,14 @@ import { MediaGrid } from "@/features/library/MediaGrid"
 import { MediaCard } from "@/features/library/MediaCard"
 import { seriesBadge } from "@/features/library/StatusBadge"
 import { AddMediaDialog } from "@/features/library/AddMediaDialog"
+import { useGridScale } from "@/features/library/useGridScale"
+import { ScaleSlider } from "@/features/library/ScaleSlider"
 
 export function TvShows() {
   const q = useSeries()
   const [filter, setFilter] = useState("")
   const [addOpen, setAddOpen] = useState(false)
+  const [scale, setScale] = useGridScale()
   const items = (q.data ?? []).filter((s) => s.title.toLowerCase().includes(filter.toLowerCase()))
 
   return (
@@ -26,8 +29,10 @@ export function TvShows() {
         >
           + Add
         </button>
+        <ScaleSlider value={scale} onChange={setScale} />
       </div>
       <MediaGrid
+        scale={scale}
         items={q.data ? items : undefined}
         isLoading={q.isLoading}
         isError={q.isError}

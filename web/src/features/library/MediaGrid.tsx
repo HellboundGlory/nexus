@@ -1,7 +1,8 @@
 import * as React from "react"
+import { DEFAULT_SCALE } from "./useGridScale"
 
 export function MediaGrid<T>({
-  items, isLoading, isError, onRetry, empty, renderCard,
+  items, isLoading, isError, onRetry, empty, renderCard, scale = DEFAULT_SCALE,
 }: {
   items: T[] | undefined
   isLoading: boolean
@@ -9,10 +10,14 @@ export function MediaGrid<T>({
   onRetry: () => void
   empty: string
   renderCard: (item: T) => React.ReactNode
+  scale?: number
 }) {
+  const gridStyle: React.CSSProperties = {
+    gridTemplateColumns: `repeat(auto-fill, minmax(${scale}px, 1fr))`,
+  }
   if (isLoading) {
     return (
-      <div data-testid="grid-loading" className="grid grid-cols-2 gap-4 p-6 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
+      <div data-testid="grid-loading" className="grid gap-4 p-6" style={gridStyle}>
         {Array.from({ length: 12 }).map((_, i) => (
           <div key={i} className="aspect-[2/3] animate-pulse rounded-lg bg-[var(--color-panel-2)]" />
         ))}
@@ -36,7 +41,7 @@ export function MediaGrid<T>({
     return <div className="p-10 text-center text-sm text-[var(--color-muted)]">{empty}</div>
   }
   return (
-    <div className="grid grid-cols-2 gap-4 p-6 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
+    <div className="grid gap-4 p-6" style={gridStyle}>
       {items.map((it) => renderCard(it))}
     </div>
   )

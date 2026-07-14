@@ -56,4 +56,57 @@ describe("AddMediaDialog", () => {
     await userEvent.type(screen.getByPlaceholderText(/search/i), "dune")
     expect(await screen.findByText(/metadata provider not configured/i)).toBeInTheDocument()
   })
+
+  it("renders results as poster tiles and can reorder by sort", async () => {
+    stub()
+    vi.mocked(lib.useLookup).mockReturnValue({
+      data: [
+        { tmdbId: 1, title: "Older Film", year: 2001, overview: "", posterUrl: "", kind: "movie" },
+        { tmdbId: 2, title: "Newer Film", year: 2020, overview: "", posterUrl: "", kind: "movie" },
+      ],
+      isLoading: false,
+    } as unknown as ReturnType<typeof lib.useLookup>)
+    vi.mocked(lib.useRootFolders).mockReturnValue({ data: [] } as unknown as ReturnType<typeof lib.useRootFolders>)
+    render(
+      <ToastProvider>
+        <AddMediaDialog kind="movie" open onOpenChange={() => {}} />
+      </ToastProvider>,
+    )
+    await userEvent.type(screen.getByPlaceholderText(/search/i), "film")
+    // the result tiles show the title and the year
+    expect(await screen.findByText("Older Film")).toBeInTheDocument()
+    expect(screen.getByText("Newer Film")).toBeInTheDocument()
+    expect(screen.getByText("2001")).toBeInTheDocument()
+    expect(screen.getByText("2020")).toBeInTheDocument()
+    // the sort control is present
+    const sortSelect = screen.getByLabelText("Sort")
+    expect(sortSelect).toBeInTheDocument()
+
+    function tileOrder() {
+      return screen
+        .getAllByRole("button")
+        .map((b) => b.textContent ?? "")
+        .filter((t) => t.includes("Older Film") || t.includes("Newer Film"))
+    }
+
+    // default (relevance) order matches the order returned by the lookup
+    expect(tileOrder()).toEqual([
+      expect.stringContaining("Older Film"),
+      expect.stringContaining("Newer Film"),
+    ])
+
+    // oldest-first: 2001 before 2020
+    await userEvent.selectOptions(sortSelect, "oldest")
+    expect(tileOrder()).toEqual([
+      expect.stringContaining("Older Film"),
+      expect.stringContaining("Newer Film"),
+    ])
+
+    // newest-first: order flips
+    await userEvent.selectOptions(sortSelect, "newest")
+    expect(tileOrder()).toEqual([
+      expect.stringContaining("Newer Film"),
+      expect.stringContaining("Older Film"),
+    ])
+  })
 })
