@@ -34,8 +34,12 @@ export function SeriesDetail({ id }: { id: number }) {
 
   return (
     <div className="p-6">
-      <button onClick={() => nav("/tv")} className="mb-4 text-sm text-[var(--color-brand)]">← TV Shows</button>
-      <DetailBanner fanartUrl={s.fanartUrl} posterUrl={s.posterUrl} title={s.title}>
+      <DetailBanner
+        fanartUrl={s.fanartUrl}
+        posterUrl={s.posterUrl}
+        title={s.title}
+        back={<button onClick={() => nav("/tv")} className="text-sm text-[var(--color-brand)]">← TV Shows</button>}
+      >
         <div className="flex items-center gap-3">
           <h2 className="text-2xl font-bold">{s.title}</h2>
           {s.firstAired ? <span className="text-[var(--color-muted)]">{s.firstAired.slice(0, 4)}</span> : null}
@@ -46,7 +50,15 @@ export function SeriesDetail({ id }: { id: number }) {
           <button onClick={() => setMon.mutate({ target: { kind: "series", id }, monitored: !s.monitored })} className="rounded-md border border-[var(--color-border)] px-3 py-1.5 text-sm">
             {s.monitored ? "Unmonitor" : "Monitor"}
           </button>
-          <button onClick={() => { search.mutate({ kind: "series", id }); toast(`Search started for ${s.title}`) }} className="rounded-md border border-[var(--color-border)] px-3 py-1.5 text-sm">Search</button>
+          <button
+            onClick={() => {
+              if (!s.qualityProfileId) { toast("Assign a quality profile before searching", { variant: "error" }); return }
+              search.mutate({ kind: "series", id }); toast(`Search started for ${s.title}`)
+            }}
+            className="rounded-md border border-[var(--color-border)] px-3 py-1.5 text-sm"
+          >
+            Search
+          </button>
           <button onClick={() => { refresh.mutate({ kind: "series", id }); toast("Refresh started") }} className="rounded-md border border-[var(--color-border)] px-3 py-1.5 text-sm">Refresh</button>
           <button
             onClick={() => { if (confirm(`Delete ${s.title}?`)) del.mutate({ kind: "series", id }, { onSuccess: () => { toast("Deleted"); nav("/tv") } }) }}

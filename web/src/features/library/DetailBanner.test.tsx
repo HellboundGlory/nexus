@@ -23,4 +23,12 @@ describe("DetailBanner", () => {
     expect(screen.queryByTestId("banner-backdrop")).toBeNull()
     expect(screen.getByText("meta")).toBeInTheDocument()
   })
+  it("renders the back slot when provided", () => {
+    render(
+      <DetailBanner fanartUrl="http://img/bd.jpg" posterUrl="" title="Breaking Bad" back={<button>← TV Shows</button>}>
+        <p>meta</p>
+      </DetailBanner>,
+    )
+    expect(screen.getByRole("button", { name: /← tv shows/i })).toBeInTheDocument()
+  })
 })

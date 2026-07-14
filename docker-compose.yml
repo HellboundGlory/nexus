@@ -14,6 +14,13 @@ services:
     restart: unless-stopped
     ports:
       - "9494:9494"
+    # IMPORTANT for imports: Nexus imports the file at the path your DOWNLOAD
+    # CLIENT reports. It must (a) see that path, and (b) be able to write into
+    # your library folders. In a typical *arr stack the download client and
+    # library run as your host user (PUID/PGID), so run Nexus as that same user
+    # and give it the SAME media mount at the SAME path as the download client.
+    # Uncomment and set to your host user's ids:
+    # user: "1000:1000"
     environment:
       # First-run only: seeds the initial admin account. Ignored once the DB
       # already has a user. Leave ADMIN_PASSWORD unset to get a random password
@@ -29,13 +36,17 @@ services:
       NEXUS_URL_BASE: ${NEXUS_URL_BASE:-}
       NEXUS_LOG_LEVEL: ${NEXUS_LOG_LEVEL:-info}
     volumes:
-      # Named volume: adopts the image's nonroot (uid 65532) ownership of /data,
-      # so it is writable out of the box. To use a host bind-mount instead:
-      #   volumes:
-      #     - ./data:/data
-      # first `chown 65532:65532 ./data` on the host (or add `user: "0:0"` to
-      # run as root — less secure).
+      # /data holds the SQLite DB + logs. The image's /data is mode 0777 so this
+      # volume stays writable even when you set `user:` above to a custom uid.
+      # For a host bind-mount instead of a named volume: `- ./data:/data`.
       - nexus-data:/data
+      # Media mount (REQUIRED for downloading + importing). Mount your media root
+      # at the SAME path the download client uses, so the completed-download path
+      # it reports resolves inside this container. Example matching a linuxserver
+      # SABnzbd/qBittorrent that mounts `${MEDIA_DIRECTORY}:/media`:
+      #   - ${MEDIA_DIRECTORY}:/media
+      # Then in Nexus → Settings → Root Folders add e.g. /media/movies and
+      # /media/tvshows (paths under this shared mount).
 
 volumes:
   nexus-data:

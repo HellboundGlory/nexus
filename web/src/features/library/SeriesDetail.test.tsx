@@ -56,4 +56,33 @@ describe("SeriesDetail", () => {
     await userEvent.click(searchButtons[1])
     expect(search).toHaveBeenCalledWith({ kind: "episode", id: 102 })
   })
+
+  it("blocks the series Search and warns when no quality profile is assigned", async () => {
+    const search = vi.fn()
+    vi.mocked(lib.useSeriesDetail).mockReturnValue({
+      data: {
+        id: 3, title: "The Bear", firstAired: "2022-06-23", overview: "", monitored: true,
+        qualityProfileId: null, posterUrl: "", fanartUrl: "", episodeCount: 0, episodeFileCount: 0,
+        seasons: [], episodes: [],
+      },
+      isLoading: false, isError: false, refetch: vi.fn(),
+    } as unknown as ReturnType<typeof lib.useSeriesDetail>)
+    vi.mocked(lib.useQualityProfiles).mockReturnValue({ data: [] } as unknown as ReturnType<typeof lib.useQualityProfiles>)
+    vi.mocked(lib.useSetMonitored).mockReturnValue(mut())
+    vi.mocked(lib.useAssignProfile).mockReturnValue(mut())
+    vi.mocked(lib.useRefresh).mockReturnValue(mut())
+    vi.mocked(lib.useDelete).mockReturnValue(mut())
+    vi.mocked(lib.useSearch).mockReturnValue(mut({ mutate: search }))
+
+    render(
+      <MemoryRouter>
+        <ToastProvider>
+          <SeriesDetail id={3} />
+        </ToastProvider>
+      </MemoryRouter>,
+    )
+    await userEvent.click(screen.getByRole("button", { name: /^search$/i }))
+    expect(search).not.toHaveBeenCalled()
+    expect(await screen.findByText(/assign a quality profile/i)).toBeInTheDocument()
+  })
 })
