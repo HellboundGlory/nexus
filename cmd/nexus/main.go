@@ -141,6 +141,7 @@ func run(ctx context.Context) error {
 	importCmd := importing.NewImportCommand(importSvc)
 
 	autoSvc := automation.NewService(st, autoSearchAdapter{svc: idxSvc}, importSvc, bus)
+	importSvc.SetResearcher(autoSvc)
 	autoAPI := automation.NewAPI(autoSvc, mgr)
 	autoCfg, err := autoSvc.Config(ctx)
 	if err != nil {
@@ -172,7 +173,7 @@ func run(ctx context.Context) error {
 	authSvc := auth.NewService(st, cfg.APIKey)
 	router := api.NewRouter(api.Deps{
 		Auth: authSvc, Store: st, Version: version.Version(), Bus: bus,
-		WSForward: []string{"indexer.status", "download.status", "media.series.updated", "media.movie.updated", "import.completed", "queue.updated", "automation.search.completed", "automation.rss.completed", "automation.upgrade.completed"},
+		WSForward: []string{"indexer.status", "download.status", "media.series.updated", "media.movie.updated", "import.completed", "queue.updated", "automation.search.completed", "automation.rss.completed", "automation.upgrade.completed", "download.failed"},
 	}, web.Handler(), idxAPI.Mount, dlAPI.Mount, mediaAPI.Mount, qualityAPI.Mount, importAPI.Mount, autoAPI.Mount)
 
 	srv := &http.Server{Addr: cfg.Addr(), Handler: router}

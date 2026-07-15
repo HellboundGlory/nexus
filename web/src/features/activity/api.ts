@@ -4,11 +4,12 @@ import { useEffect } from "react"
 import { apiGet, apiPost, apiDelete } from "@/lib/api"
 import { useActivity } from "@/lib/activity"
 import { shouldRefresh } from "./resolve"
-import type { QueueItem, HistoryEvent } from "./types"
+import type { QueueItem, HistoryEvent, BlocklistEntry } from "./types"
 
 export const activityKeys = {
   queue: ["queue"] as const,
   history: ["history"] as const,
+  blocklist: ["blocklist"] as const,
 }
 
 export function useQueue() {
@@ -41,6 +42,18 @@ export function useRemoveQueueItem() {
   })
 }
 
+export function useBlocklist() {
+  return useQuery({ queryKey: activityKeys.blocklist, queryFn: () => apiGet<BlocklistEntry[]>("/blocklist") })
+}
+
+export function useRemoveBlocklist() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: number) => apiDelete<void>(`/blocklist/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: activityKeys.blocklist }),
+  })
+}
+
 export function useActivityInvalidation(): void {
   const events = useActivity()
   const qc = useQueryClient()
@@ -49,6 +62,7 @@ export function useActivityInvalidation(): void {
     if (latest && shouldRefresh(latest.type)) {
       qc.invalidateQueries({ queryKey: activityKeys.queue })
       qc.invalidateQueries({ queryKey: activityKeys.history })
+      qc.invalidateQueries({ queryKey: activityKeys.blocklist })
     }
     // keyed on the latest event id so it fires once per new event
     // eslint-disable-next-line react-hooks/exhaustive-deps

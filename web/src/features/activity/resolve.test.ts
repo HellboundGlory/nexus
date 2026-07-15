@@ -99,4 +99,8 @@ describe("shouldRefresh", () => {
     expect(shouldRefresh("indexer.status")).toBe(false)
     expect(shouldRefresh("")).toBe(false)
   })
+  it("refreshes on download.failed", () => {
+    expect(shouldRefresh("download.failed")).toBe(true)
+    expect(shouldRefresh("nope")).toBe(false)
+  })
 })

@@ -26,6 +26,10 @@ func (a *API) Mount(r chi.Router) {
 		r.Post("/{id}/import", a.importItem)
 	})
 	r.Get("/history", a.history)
+	r.Route("/blocklist", func(r chi.Router) {
+		r.Get("/", a.listBlocklist)
+		r.Delete("/{id}", a.removeBlocklist)
+	})
 	r.Route("/config/naming", func(r chi.Router) {
 		r.Get("/", a.getNaming)
 		r.Put("/", a.putNaming)
@@ -121,6 +125,50 @@ func (a *API) history(w http.ResponseWriter, r *http.Request) {
 		rows = []store.HistoryEvent{}
 	}
 	api.WriteJSON(w, http.StatusOK, rows)
+}
+
+type blocklistDTO struct {
+	store.Blocklist
+	Title string `json:"title"` // movie/series display title, "" if deleted
+}
+
+func (a *API) listBlocklist(w http.ResponseWriter, r *http.Request) {
+	rows, err := a.svc.store.ListBlocklist(r.Context())
+	if err != nil {
+		api.WriteError(w, http.StatusInternalServerError, "internal", "failed to list blocklist")
+		return
+	}
+	out := make([]blocklistDTO, 0, len(rows))
+	for _, bl := range rows {
+		title := ""
+		if bl.MovieID != nil {
+			if m, err := a.svc.store.GetMovie(r.Context(), *bl.MovieID); err == nil {
+				title = m.Title
+			}
+		} else if bl.SeriesID != nil {
+			if se, err := a.svc.store.GetSeries(r.Context(), *bl.SeriesID); err == nil {
+				title = se.Title
+			}
+		}
+		out = append(out, blocklistDTO{Blocklist: bl, Title: title})
+	}
+	api.WriteJSON(w, http.StatusOK, out)
+}
+
+func (a *API) removeBlocklist(w http.ResponseWriter, r *http.Request) {
+	id, ok := idParam(w, r)
+	if !ok {
+		return
+	}
+	if err := a.svc.store.RemoveBlocklist(r.Context(), id); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			api.WriteError(w, http.StatusNotFound, "not_found", "blocklist entry not found")
+			return
+		}
+		api.WriteError(w, http.StatusInternalServerError, "internal", "failed to remove blocklist entry")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (a *API) getNaming(w http.ResponseWriter, r *http.Request) {

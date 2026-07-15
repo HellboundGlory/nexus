@@ -296,7 +296,12 @@ func (s *Service) RSSSync(ctx context.Context) (RSSResult, error) {
 			continue
 		}
 		cands := Decide(rels, provider.KindMovie, profile)
-		_, grabbed, err := s.enqueueBest(ctx, cands, func(c Candidate) importing.EnqueueRequest {
+		mid := movieID
+		blocked, err := s.store.BlocklistedTitles(ctx, &mid, nil)
+		if err != nil {
+			slog.Warn("automation: blocklist lookup failed", "movieId", mid, "err", err)
+		}
+		_, grabbed, err := s.enqueueBest(ctx, cands, blocked, func(c Candidate) importing.EnqueueRequest {
 			return importing.EnqueueRequest{
 				DownloadURL: c.Release.DownloadURL, Title: c.Release.Title,
 				Protocol: c.Release.Protocol, IndexerID: c.Release.IndexerID,
@@ -343,6 +348,11 @@ func (s *Service) RSSSync(ctx context.Context) (RSSResult, error) {
 // unhandled missing episode. Mirrors the wanted/missing season strategy but over
 // an already-fetched candidate pool.
 func (s *Service) rssPlaceTV(ctx context.Context, se *store.Series, eps []store.Episode, ranked []Candidate, activeEps map[int64]struct{}) (int, error) {
+	blocked, err := s.store.BlocklistedTitles(ctx, nil, &se.ID)
+	if err != nil {
+		slog.Warn("automation: blocklist lookup failed", "seriesId", se.ID, "err", err)
+	}
+
 	missingBySeason := map[int][]store.Episode{}
 	monitoredBySeason := map[int]int{}
 	for _, e := range eps {
@@ -377,7 +387,7 @@ func (s *Service) rssPlaceTV(ctx context.Context, se *store.Series, eps []store.
 			continue
 		}
 		ids := episodeIDs(missing)
-		_, ok, err := s.enqueueBest(ctx, packs, func(c Candidate) importing.EnqueueRequest {
+		_, ok, err := s.enqueueBest(ctx, packs, blocked, func(c Candidate) importing.EnqueueRequest {
 			return tvRequest(se.ID, ids, c)
 		})
 		if err != nil {
@@ -414,7 +424,7 @@ func (s *Service) rssPlaceTV(ctx context.Context, se *store.Series, eps []store.
 			// in this loop would find the same release still in `covering`
 			// (activeEps is a poll-start snapshot, not updated mid-poll) and
 			// grab it again, producing a duplicate download.
-			chosen, ok, err := s.enqueueBest(ctx, covering, func(c Candidate) importing.EnqueueRequest {
+			chosen, ok, err := s.enqueueBest(ctx, covering, blocked, func(c Candidate) importing.EnqueueRequest {
 				var ids []int64
 				for _, m := range missing {
 					if containsInt(c.Parsed.Episodes, m.EpisodeNumber) {

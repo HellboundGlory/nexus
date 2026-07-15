@@ -82,7 +82,7 @@ export function statusTone(s: string): Tone {
   }
 }
 
-const REFRESH_EVENTS = new Set(["queue.updated", "import.completed", "download.status"])
+const REFRESH_EVENTS = new Set(["queue.updated", "import.completed", "download.status", "download.failed"])
 export function shouldRefresh(type: string): boolean {
   return REFRESH_EVENTS.has(type)
 }

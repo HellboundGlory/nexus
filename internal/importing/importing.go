@@ -34,15 +34,26 @@ const namingSettingKey = "naming.config"
 
 // Service owns enqueue + import.
 type Service struct {
-	store *store.Store
-	grab  Grabber
-	queue QueueReader
-	bus   *events.Bus
+	store      *store.Store
+	grab       Grabber
+	queue      QueueReader
+	bus        *events.Bus
+	researcher Researcher
 }
 
 func NewService(st *store.Store, grab Grabber, q QueueReader, bus *events.Bus) *Service {
 	return &Service{store: st, grab: grab, queue: q, bus: bus}
 }
+
+// Researcher re-searches a target after its download failed. Implemented by the
+// automation service and wired in main.go (importing defines the interface to
+// avoid an import cycle: automation depends on importing, not the reverse).
+type Researcher interface {
+	ResearchMovie(ctx context.Context, movieID int64) error
+	ResearchEpisode(ctx context.Context, episodeID int64) error
+}
+
+func (s *Service) SetResearcher(r Researcher) { s.researcher = r }
 
 // NamingConfig returns the persisted config, or the defaults if none saved.
 func (s *Service) NamingConfig(ctx context.Context) (naming.Config, error) {
@@ -89,6 +100,18 @@ type ImportCompletedEvent struct {
 }
 
 func (ImportCompletedEvent) Name() string { return "import.completed" }
+
+// DownloadFailedEvent is published when a grabbed download failed and was
+// blocklisted + removed. Forwarded to the UI so it refreshes queue/history/blocklist.
+type DownloadFailedEvent struct {
+	QueueID    int64   `json:"queueId"`
+	MediaKind  string  `json:"mediaKind"`
+	MovieID    *int64  `json:"movieId,omitempty"`
+	SeriesID   *int64  `json:"seriesId,omitempty"`
+	EpisodeIDs []int64 `json:"episodeIds"`
+}
+
+func (DownloadFailedEvent) Name() string { return "download.failed" }
 
 var (
 	// ErrRejected means the release's quality is not allowed by the item's profile.

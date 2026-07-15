@@ -205,7 +205,11 @@ func (s *Service) upgradeMovie(ctx context.Context, m store.Movie, f *store.Medi
 		slog.Warn("automation: upgrade movie search had indexer errors", "movieId", m.ID, "err", err)
 	}
 	cands := upgradeCandidates(Decide(releases, provider.KindMovie, profile), f.QualityID, profile, movieKey(m.ID), cs)
-	_, grabbed, err := s.enqueueBest(ctx, cands, func(c Candidate) importing.EnqueueRequest {
+	blocked, err := s.store.BlocklistedTitles(ctx, &m.ID, nil)
+	if err != nil {
+		slog.Warn("automation: blocklist lookup failed", "movieId", m.ID, "err", err)
+	}
+	_, grabbed, err := s.enqueueBest(ctx, cands, blocked, func(c Candidate) importing.EnqueueRequest {
 		return importing.EnqueueRequest{
 			DownloadURL: c.Release.DownloadURL, Title: c.Release.Title,
 			Protocol: c.Release.Protocol, IndexerID: c.Release.IndexerID,
@@ -234,7 +238,11 @@ func (s *Service) upgradeEpisode(ctx context.Context, se *store.Series, e store.
 		}
 	}
 	covering = upgradeCandidates(covering, f.QualityID, profile, seriesKey(se.ID), cs)
-	_, grabbed, err := s.enqueueBest(ctx, covering, func(c Candidate) importing.EnqueueRequest {
+	blocked, err := s.store.BlocklistedTitles(ctx, nil, &se.ID)
+	if err != nil {
+		slog.Warn("automation: blocklist lookup failed", "seriesId", se.ID, "err", err)
+	}
+	_, grabbed, err := s.enqueueBest(ctx, covering, blocked, func(c Candidate) importing.EnqueueRequest {
 		return tvRequest(se.ID, []int64{e.ID}, c)
 	})
 	if err != nil {

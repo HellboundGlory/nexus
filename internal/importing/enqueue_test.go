@@ -23,18 +23,25 @@ func (f *fakeGrabber) Grab(_ context.Context, req provider.DownloadRequest, _ st
 }
 
 type fakeQueue struct {
-	items []provider.DownloadItem
+	items   []provider.DownloadItem
+	removed map[string]bool
 }
 
-func (f *fakeQueue) Queue(context.Context) []provider.DownloadItem      { return f.items }
-func (f *fakeQueue) Remove(context.Context, string, string, bool) error { return nil }
+func (f *fakeQueue) Queue(context.Context) []provider.DownloadItem { return f.items }
+func (f *fakeQueue) Remove(_ context.Context, _, itemID string, _ bool) error {
+	if f.removed == nil {
+		f.removed = map[string]bool{}
+	}
+	f.removed[itemID] = true
+	return nil
+}
 
 func newSvc(t *testing.T) (*Service, *store.Store) {
 	t.Helper()
 	return newSvcWithQueue(t, &fakeQueue{})
 }
 
-func newSvcWithQueue(t *testing.T, q QueueReader) (*Service, *store.Store) {
+func newTestStore(t *testing.T) *store.Store {
 	t.Helper()
 	db, err := database.Open(t.TempDir() + "/t.db")
 	if err != nil {
@@ -44,7 +51,12 @@ func newSvcWithQueue(t *testing.T, q QueueReader) (*Service, *store.Store) {
 	if err := database.Migrate(db); err != nil {
 		t.Fatal(err)
 	}
-	st := store.New(db)
+	return store.New(db)
+}
+
+func newSvcWithQueue(t *testing.T, q QueueReader) (*Service, *store.Store) {
+	t.Helper()
+	st := newTestStore(t)
 	return NewService(st, &fakeGrabber{returnID: "h1"}, q, nil), st
 }
 

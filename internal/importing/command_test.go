@@ -46,13 +46,13 @@ func TestImportCompletedScansGrabbedRows(t *testing.T) {
 		t.Fatalf("should still be grabbed, got %q", r.Status)
 	}
 
-	// now completed -> imported
+	// now completed -> imported, queue row deleted (queue is transient)
 	fq.items = []provider.DownloadItem{{ID: "h1", DownloadClientID: "c1", Status: provider.StatusCompleted, OutputPath: dl}}
 	if err := (NewImportCommand(svc)).Run(ctx, nopReporter{}); err != nil {
 		t.Fatal(err)
 	}
-	if r, _ := st.GetQueueItem(ctx, q.ID); r.Status != store.QueueImported {
-		t.Fatalf("expected imported, got %q", r.Status)
+	if _, err := st.GetQueueItem(ctx, q.ID); err != store.ErrNotFound {
+		t.Fatalf("expected queue row deleted after import, got %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(root, "The Show", "Season 01", "The Show - S01E01 - Pilot [Bluray-1080p].mkv")); err != nil {
 		t.Fatalf("file not imported: %v", err)
@@ -92,7 +92,70 @@ func TestImportCompletedMatchesRowWithoutClientOverride(t *testing.T) {
 	if err := svc.ImportCompleted(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if r, _ := st.GetQueueItem(ctx, q.ID); r.Status != store.QueueImported {
-		t.Fatalf("expected imported for no-override row, got %q", r.Status)
+	if _, err := st.GetQueueItem(ctx, q.ID); err != store.ErrNotFound {
+		t.Fatalf("expected queue row deleted for no-override row, got %v", err)
+	}
+}
+
+type fakeResearcher struct{ movies, episodes []int64 }
+
+func (f *fakeResearcher) ResearchMovie(_ context.Context, id int64) error {
+	f.movies = append(f.movies, id)
+	return nil
+}
+
+func (f *fakeResearcher) ResearchEpisode(_ context.Context, id int64) error {
+	f.episodes = append(f.episodes, id)
+	return nil
+}
+
+func TestReconcileFailedDownloadBlocklistsAndRetries(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+	mid, err := st.CreateMovie(ctx, store.Movie{TMDBID: 100, Title: "Dune", Year: 2021})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// a grabbed movie queue row
+	row, err := st.EnqueueGrab(ctx, store.QueueItem{
+		DownloadClientID: "sab1", ClientItemID: "nzo_1", Protocol: "usenet",
+		SourceTitle: "Dune.2021.1080p-GRP", MediaKind: "movie", MovieID: &mid,
+		QualityID: 3, Status: store.QueueGrabbed,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// live client reports it FAILED
+	q := &fakeQueue{items: []provider.DownloadItem{{
+		ID: "nzo_1", DownloadClientID: "sab1", Status: provider.StatusFailed, ErrorMessage: "missing articles",
+	}}}
+	res := &fakeResearcher{}
+	svc := NewService(st, &fakeGrabber{}, q, nil)
+	svc.SetResearcher(res)
+
+	if err := svc.ImportCompleted(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// queue row deleted
+	if _, err := st.GetQueueItem(ctx, row.ID); err != store.ErrNotFound {
+		t.Fatalf("queue row should be deleted, got %v", err)
+	}
+	// release blocklisted for the movie
+	bl, _ := st.BlocklistedTitles(ctx, &mid, nil)
+	if !bl[store.NormReleaseTitle("Dune.2021.1080p-GRP")] {
+		t.Fatalf("release not blocklisted: %v", bl)
+	}
+	// download_failed history recorded
+	hist, _ := st.ListHistory(ctx, 10)
+	if len(hist) == 0 || hist[0].EventType != "download_failed" {
+		t.Fatalf("expected download_failed history, got %+v", hist)
+	}
+	// re-search triggered for the movie
+	if len(res.movies) != 1 || res.movies[0] != mid {
+		t.Fatalf("expected ResearchMovie(%d), got %v", mid, res.movies)
+	}
+	// dead client item removed
+	if !q.removed["nzo_1"] {
+		t.Fatalf("client item should be removed")
 	}
 }
