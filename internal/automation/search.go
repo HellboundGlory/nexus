@@ -52,8 +52,7 @@ func (s *Service) searchMovie(ctx context.Context, movieID int64) (int, error) {
 	if err != nil {
 		slog.Warn("automation: blocklist lookup failed", "movieId", m.ID, "err", err)
 	}
-	cands = filterBlocklisted(cands, blocked)
-	_, grabbed, err := s.enqueueBest(ctx, cands, func(c Candidate) importing.EnqueueRequest {
+	_, grabbed, err := s.enqueueBest(ctx, cands, blocked, func(c Candidate) importing.EnqueueRequest {
 		return importing.EnqueueRequest{
 			DownloadURL: c.Release.DownloadURL, Title: c.Release.Title,
 			Protocol: c.Release.Protocol, IndexerID: c.Release.IndexerID,
@@ -123,7 +122,8 @@ func (s *Service) profileFor(ctx context.Context, profileID *int64) (store.Quali
 // true once one is grabbed (zero Candidate and false otherwise). A grab failure
 // (network/reject) falls through to the next candidate; importing.ErrNoProfile
 // is terminal for the item (nothing more to try).
-func (s *Service) enqueueBest(ctx context.Context, cands []Candidate, req func(Candidate) importing.EnqueueRequest) (Candidate, bool, error) {
+func (s *Service) enqueueBest(ctx context.Context, cands []Candidate, blocked map[string]bool, req func(Candidate) importing.EnqueueRequest) (Candidate, bool, error) {
+	cands = filterBlocklisted(cands, blocked)
 	for _, c := range cands {
 		if _, err := s.enqueue.Enqueue(ctx, req(c)); err == nil {
 			return c, true, nil
@@ -250,9 +250,8 @@ func (s *Service) searchSeason(ctx context.Context, se *store.Series, seasonNumb
 		if err != nil {
 			slog.Warn("automation: blocklist lookup failed", "seriesId", se.ID, "season", seasonNumber, "err", err)
 		}
-		packs = filterBlocklisted(packs, blocked)
 		ids := episodeIDs(missing)
-		_, grabbed, err := s.enqueueBest(ctx, packs, func(c Candidate) importing.EnqueueRequest {
+		_, grabbed, err := s.enqueueBest(ctx, packs, blocked, func(c Candidate) importing.EnqueueRequest {
 			return tvRequest(se.ID, ids, c)
 		})
 		if err != nil {
@@ -332,8 +331,7 @@ func (s *Service) searchEpisode(ctx context.Context, se *store.Series, e store.E
 	if err != nil {
 		slog.Warn("automation: blocklist lookup failed", "seriesId", e.SeriesID, "episodeId", e.ID, "err", err)
 	}
-	covering = filterBlocklisted(covering, blocked)
-	_, grabbed, err := s.enqueueBest(ctx, covering, func(c Candidate) importing.EnqueueRequest {
+	_, grabbed, err := s.enqueueBest(ctx, covering, blocked, func(c Candidate) importing.EnqueueRequest {
 		return tvRequest(se.ID, []int64{e.ID}, c)
 	})
 	if err != nil {

@@ -274,6 +274,38 @@ func TestRSSSyncMultiEpisodeReleaseNotDoubleGrabbedInPartialSeason(t *testing.T)
 	}
 }
 
+func TestRSSSyncSkipsBlocklistedRelease(t *testing.T) {
+	st := newStore(t)
+	ctx := context.Background()
+	id := seedMovie(t, st, true, true) // "The Film" (2020), tmdb 42+seq, monitored, HD profile
+	blockedTitle := "The.Film.2020.1080p.BluRay.x264-GRP"
+	if _, err := st.AddBlocklist(ctx, store.Blocklist{
+		MediaKind: "movie", MovieID: &id, SourceTitle: blockedTitle,
+		Protocol: "usenet", Reason: "test",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	fs := &fakeSearcher{releases: []provider.Release{
+		// Best release (Bluray) is blocklisted; must not be re-grabbed.
+		{Title: blockedTitle, DownloadURL: "blocked", Protocol: provider.ProtocolUsenet, Categories: []int{2040}},
+		// Clean alternative (WEB-DL) must still be grabbed.
+		{Title: "The.Film.2020.1080p.WEB-DL.x264-GRP", DownloadURL: "clean", Protocol: provider.ProtocolUsenet, Categories: []int{2040}},
+	}}
+	fe := &fakeEnqueuer{}
+	svc := NewService(st, fs, fe, nil)
+
+	res, err := svc.RSSSync(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Grabbed != 1 || len(fe.reqs) != 1 {
+		t.Fatalf("want exactly 1 grab (the clean alternative): res=%+v reqs=%+v", res, fe.reqs)
+	}
+	if fe.reqs[0].DownloadURL != "clean" {
+		t.Fatalf("blocklisted release must not be grabbed; want clean alternative, got %q", fe.reqs[0].DownloadURL)
+	}
+}
+
 func TestRSSSyncSkipsInFlightEpisode(t *testing.T) {
 	st := newStore(t)
 	ctx := context.Background()
