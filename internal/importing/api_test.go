@@ -1,8 +1,10 @@
 package importing
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -39,6 +41,38 @@ func TestAPIEnqueueRejectMaps400(t *testing.T) {
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("reject status=%d want 400 body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestBlocklistListAndDelete(t *testing.T) {
+	h, st := newTestAPI(t)
+	ctx := context.Background()
+	mid, err := st.CreateMovie(ctx, store.Movie{TMDBID: 1, Title: "Dune"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := st.AddBlocklist(ctx, store.Blocklist{MediaKind: "movie", MovieID: &mid, SourceTitle: "Dune.2021-GRP", Reason: "boom"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// GET
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/blocklist", nil))
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "Dune.2021-GRP") || !strings.Contains(rr.Body.String(), `"title":"Dune"`) {
+		t.Fatalf("GET /blocklist = %d %s", rr.Code, rr.Body.String())
+	}
+	// DELETE
+	rr = httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodDelete, "/blocklist/"+strconv.FormatInt(id, 10), nil))
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("DELETE = %d", rr.Code)
+	}
+	// DELETE missing -> 404
+	rr = httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodDelete, "/blocklist/9999", nil))
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("DELETE missing = %d", rr.Code)
 	}
 }
 
