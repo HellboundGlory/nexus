@@ -143,4 +143,10 @@ describe("queueRowDisplay", () => {
     expect(queueRowDisplay({ status: "imported" })).toEqual({ kind: "status", label: "Imported", tone: "ok" })
     expect(queueRowDisplay({ status: "failed" })).toEqual({ kind: "status", label: "Failed", tone: "error" })
   })
+  it("does not show a live bar for a grabbed row whose live status is terminal/unknown (no failed flash)", () => {
+    expect(queueRowDisplay({ status: "grabbed", progress: 30, downloadStatus: "failed" }))
+      .toEqual({ kind: "status", label: "Grabbed", tone: "neutral" })
+    expect(queueRowDisplay({ status: "grabbed", progress: 30, downloadStatus: "bogus" }))
+      .toEqual({ kind: "status", label: "Grabbed", tone: "neutral" })
+  })
 })

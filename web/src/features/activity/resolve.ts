@@ -98,6 +98,11 @@ export function liveStatusLabel(s: string): string {
   return LIVE_STATUS_LABELS[s] ?? s
 }
 
+// Live sub-statuses that warrant a progress bar. A grabbed row whose live
+// status is terminal/unexpected (e.g. "failed", which the ~30s import-reconcile
+// blocklists+removes) falls back to the grab label rather than flashing a bar.
+const LIVE_STATUSES = new Set(Object.keys(LIVE_STATUS_LABELS))
+
 export type QueueDisplay =
   | { kind: "live"; percent: number; label: string; tone: Tone }
   | { kind: "status"; label: string; tone: Tone }
@@ -107,10 +112,11 @@ export function queueRowDisplay(row: {
   progress?: number
   downloadStatus?: string
 }): QueueDisplay {
-  // Live progress overrides the grab-status label ONLY for grabbed rows that
-  // have a live match. Presence of downloadStatus is the discriminator — never
-  // the numeric progress (a genuine 0% row still has a downloadStatus).
-  if (row.status === "grabbed" && row.downloadStatus != null) {
+  // Live progress overrides the grab-status label ONLY for grabbed rows whose
+  // live status is a known in-flight state. Presence of downloadStatus is the
+  // discriminator — never the numeric progress (a genuine 0% row still has a
+  // downloadStatus).
+  if (row.status === "grabbed" && row.downloadStatus != null && LIVE_STATUSES.has(row.downloadStatus)) {
     return { kind: "live", percent: row.progress ?? 0, label: liveStatusLabel(row.downloadStatus), tone: "info" }
   }
   return { kind: "status", label: statusLabel(row.status), tone: statusTone(row.status) }
