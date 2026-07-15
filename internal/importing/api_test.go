@@ -2,6 +2,7 @@ package importing
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -9,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/hellboundg/nexus/internal/core/provider"
 	"github.com/hellboundg/nexus/internal/core/store"
 )
 
@@ -73,6 +75,64 @@ func TestBlocklistListAndDelete(t *testing.T) {
 	h.ServeHTTP(rr, httptest.NewRequest(http.MethodDelete, "/blocklist/9999", nil))
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("DELETE missing = %d", rr.Code)
+	}
+}
+
+func TestAPIQueueEnrichesLiveProgress(t *testing.T) {
+	ctx := context.Background()
+	prog := 42.5
+	fq := &fakeQueue{items: []provider.DownloadItem{
+		{ID: "h1", DownloadClientID: "sab", Status: provider.StatusDownloading, Progress: prog},
+	}}
+	svc, st := newSvcWithQueue(t, fq)
+	r := chi.NewRouter()
+	NewAPI(svc).Mount(r)
+
+	// matched row (client item "h1" is live)
+	if _, err := st.EnqueueGrab(ctx, store.QueueItem{
+		DownloadClientID: "sab", ClientItemID: "h1", Protocol: "usenet",
+		SourceTitle: "Matched.Release", MediaKind: "movie", Status: store.QueueGrabbed,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// matchless row (no live item with id "ghost")
+	if _, err := st.EnqueueGrab(ctx, store.QueueItem{
+		DownloadClientID: "sab", ClientItemID: "ghost", Protocol: "usenet",
+		SourceTitle: "Matchless.Release", MediaKind: "movie", Status: store.QueueGrabbed,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/queue", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+
+	var got []queueItemDTO
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v body=%s", err, w.Body.String())
+	}
+	if len(got) != 2 {
+		t.Fatalf("want 2 rows got %d", len(got))
+	}
+	var matched, matchless *queueItemDTO
+	for i := range got {
+		switch got[i].ClientItemID {
+		case "h1":
+			matched = &got[i]
+		case "ghost":
+			matchless = &got[i]
+		}
+	}
+	if matched == nil || matchless == nil {
+		t.Fatalf("rows not found: %+v", got)
+	}
+	if matched.Progress == nil || *matched.Progress != 42.5 || matched.DownloadStatus != "downloading" {
+		t.Fatalf("matched enrichment wrong: progress=%v status=%q", matched.Progress, matched.DownloadStatus)
+	}
+	if matchless.Progress != nil || matchless.DownloadStatus != "" {
+		t.Fatalf("matchless row should be unenriched: progress=%v status=%q", matchless.Progress, matchless.DownloadStatus)
 	}
 }
 

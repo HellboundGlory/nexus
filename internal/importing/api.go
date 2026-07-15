@@ -45,16 +45,30 @@ func idParam(w http.ResponseWriter, r *http.Request) (int64, bool) {
 	return id, true
 }
 
+type queueItemDTO struct {
+	store.QueueItem
+	Progress       *float64 `json:"progress,omitempty"`       // 0..100, nil when no live match
+	DownloadStatus string   `json:"downloadStatus,omitempty"` // provider.DownloadStatus, "" when no live match
+}
+
 func (a *API) listQueue(w http.ResponseWriter, r *http.Request) {
 	rows, err := a.svc.store.ListQueue(r.Context())
 	if err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "internal", "failed to list queue")
 		return
 	}
-	if rows == nil {
-		rows = []store.QueueItem{}
+	live := a.svc.queue.Queue(r.Context())
+	out := make([]queueItemDTO, 0, len(rows))
+	for _, row := range rows {
+		dto := queueItemDTO{QueueItem: row}
+		if it, ok := matchItem(live, row); ok {
+			p := it.Progress
+			dto.Progress = &p
+			dto.DownloadStatus = string(it.Status)
+		}
+		out = append(out, dto)
 	}
-	api.WriteJSON(w, http.StatusOK, rows)
+	api.WriteJSON(w, http.StatusOK, out)
 }
 
 type enqueueBody struct {
