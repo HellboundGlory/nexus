@@ -48,6 +48,8 @@ func (s *Service) searchMovie(ctx context.Context, movieID int64) (int, error) {
 		slog.Warn("automation: movie search had indexer errors", "movieId", m.ID, "err", err)
 	}
 	cands := Decide(releases, provider.KindMovie, profile)
+	blocked, _ := s.store.BlocklistedTitles(ctx, &m.ID, nil)
+	cands = filterBlocklisted(cands, blocked)
 	_, grabbed, err := s.enqueueBest(ctx, cands, func(c Candidate) importing.EnqueueRequest {
 		return importing.EnqueueRequest{
 			DownloadURL: c.Release.DownloadURL, Title: c.Release.Title,
@@ -241,6 +243,8 @@ func (s *Service) searchSeason(ctx context.Context, se *store.Series, seasonNumb
 				packs = append(packs, c)
 			}
 		}
+		blocked, _ := s.store.BlocklistedTitles(ctx, nil, &se.ID)
+		packs = filterBlocklisted(packs, blocked)
 		ids := episodeIDs(missing)
 		_, grabbed, err := s.enqueueBest(ctx, packs, func(c Candidate) importing.EnqueueRequest {
 			return tvRequest(se.ID, ids, c)
@@ -318,6 +322,8 @@ func (s *Service) searchEpisode(ctx context.Context, se *store.Series, e store.E
 			covering = append(covering, c)
 		}
 	}
+	blocked, _ := s.store.BlocklistedTitles(ctx, nil, &e.SeriesID)
+	covering = filterBlocklisted(covering, blocked)
 	_, grabbed, err := s.enqueueBest(ctx, covering, func(c Candidate) importing.EnqueueRequest {
 		return tvRequest(se.ID, []int64{e.ID}, c)
 	})
