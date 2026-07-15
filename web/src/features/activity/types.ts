@@ -14,6 +14,8 @@ export type QueueItem = {
   error?: string
   createdAt: string
   updatedAt: string
+  progress?: number
+  downloadStatus?: string
 }
 
 export type BlocklistEntry = {

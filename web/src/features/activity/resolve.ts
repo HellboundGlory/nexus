@@ -86,3 +86,32 @@ const REFRESH_EVENTS = new Set(["queue.updated", "import.completed", "download.s
 export function shouldRefresh(type: string): boolean {
   return REFRESH_EVENTS.has(type)
 }
+
+const LIVE_STATUS_LABELS: Record<string, string> = {
+  downloading: "Downloading",
+  queued: "Queued",
+  paused: "Paused",
+  warning: "Warning",
+  completed: "Completed",
+}
+export function liveStatusLabel(s: string): string {
+  return LIVE_STATUS_LABELS[s] ?? s
+}
+
+export type QueueDisplay =
+  | { kind: "live"; percent: number; label: string; tone: Tone }
+  | { kind: "status"; label: string; tone: Tone }
+
+export function queueRowDisplay(row: {
+  status: string
+  progress?: number
+  downloadStatus?: string
+}): QueueDisplay {
+  // Live progress overrides the grab-status label ONLY for grabbed rows that
+  // have a live match. Presence of downloadStatus is the discriminator — never
+  // the numeric progress (a genuine 0% row still has a downloadStatus).
+  if (row.status === "grabbed" && row.downloadStatus != null) {
+    return { kind: "live", percent: row.progress ?? 0, label: liveStatusLabel(row.downloadStatus), tone: "info" }
+  }
+  return { kind: "status", label: statusLabel(row.status), tone: statusTone(row.status) }
+}
