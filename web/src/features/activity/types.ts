@@ -16,6 +16,19 @@ export type QueueItem = {
   updatedAt: string
 }
 
+export type BlocklistEntry = {
+  id: number
+  mediaKind: string
+  movieId?: number
+  seriesId?: number
+  sourceTitle: string
+  protocol: string
+  qualityId: number
+  reason: string
+  createdAt: string
+  title: string
+}
+
 export type HistoryEvent = {
   id: number
   eventType: string
