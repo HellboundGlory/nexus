@@ -103,4 +103,35 @@ describe("QueueSection", () => {
     await userEvent.click(screen.getByRole("button", { name: /import/i }))
     expect(await screen.findByText(/quality not in profile/i)).toBeInTheDocument()
   })
+
+  it("renders a progress bar and percent for a downloading grabbed row", () => {
+    vi.mocked(api.useQueue).mockReturnValue({
+      data: [row({ status: "grabbed", progress: 42.5, downloadStatus: "downloading" })],
+      isLoading: false, isError: false,
+    } as never)
+    renderQueue()
+    const bar = screen.getByRole("progressbar")
+    expect(bar).toHaveAttribute("aria-valuenow", "43")
+    expect(screen.getByText("43%")).toBeInTheDocument()
+    expect(screen.getByText("Downloading")).toBeInTheDocument()
+  })
+
+  it("renders no progress bar for a grabbed row with no live match", () => {
+    vi.mocked(api.useQueue).mockReturnValue({
+      data: [row({ status: "grabbed" })], isLoading: false, isError: false,
+    } as never)
+    renderQueue()
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument()
+    expect(screen.getByText("Grabbed")).toBeInTheDocument()
+  })
+
+  it("renders no progress bar for an importing row even if live data is present", () => {
+    vi.mocked(api.useQueue).mockReturnValue({
+      data: [row({ status: "importing", progress: 90, downloadStatus: "downloading" })],
+      isLoading: false, isError: false,
+    } as never)
+    renderQueue()
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument()
+    expect(screen.getByText("Importing")).toBeInTheDocument()
+  })
 })

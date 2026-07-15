@@ -6,7 +6,7 @@ import { useMovies, useSeries } from "@/features/library/api"
 import { useQualityDefinitions } from "@/features/settings/qualityApi"
 import { useQueue, useImportItem, useRemoveQueueItem } from "./api"
 import {
-  movieTitleMap, seriesTitleMap, resolveTitle, qualityName, statusLabel, statusTone, type Tone,
+  movieTitleMap, seriesTitleMap, resolveTitle, qualityName, queueRowDisplay, type Tone,
 } from "./resolve"
 
 const toneClass: Record<Tone, string> = {
@@ -65,6 +65,7 @@ export function QueueSection() {
         <tbody>
           {rows.map((r) => {
             const title = resolveTitle(r, movieMap, seriesMap)
+            const disp = queueRowDisplay(r)
             return (
               <tr key={r.id} className="border-b border-[var(--color-border)] align-top last:border-b-0">
                 <td className="py-2.5 pr-4">
@@ -79,7 +80,28 @@ export function QueueSection() {
                 <td className="py-2.5 pr-4 text-[var(--color-muted)]">{r.mediaKind}</td>
                 <td className="py-2.5 pr-4">{qualityName(r.qualityId, defs.data)}</td>
                 <td className="py-2.5 pr-4 text-[var(--color-muted)]">{r.protocol}</td>
-                <td className={`py-2.5 pr-4 font-semibold ${toneClass[statusTone(r.status)]}`}>{statusLabel(r.status)}</td>
+                <td className="py-2.5 pr-4">
+                  {disp.kind === "live" ? (
+                    <div className="min-w-[7rem]">
+                      <div className="mb-1 flex items-center justify-between gap-2">
+                        <span className={`text-xs font-semibold ${toneClass[disp.tone]}`}>{disp.label}</span>
+                        <span className="text-xs tabular-nums text-[var(--color-muted)]">{Math.round(disp.percent)}%</span>
+                      </div>
+                      <div className="h-1.5 w-full overflow-hidden rounded bg-[var(--color-border)]">
+                        <div
+                          role="progressbar"
+                          aria-valuenow={Math.round(disp.percent)}
+                          aria-valuemin={0}
+                          aria-valuemax={100}
+                          className="h-full rounded bg-[var(--color-brand)]"
+                          style={{ width: `${Math.round(disp.percent)}%` }}
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <span className={`font-semibold ${toneClass[disp.tone]}`}>{disp.label}</span>
+                  )}
+                </td>
                 <td className="whitespace-nowrap py-2.5 pr-4 text-[var(--color-muted)]">
                   {relativeTime(new Date(r.createdAt).getTime())}
                 </td>
