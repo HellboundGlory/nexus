@@ -134,6 +134,44 @@ func TestAPIQueueEnrichesLiveProgress(t *testing.T) {
 	if matchless.Progress != nil || matchless.DownloadStatus != "" {
 		t.Fatalf("matchless row should be unenriched: progress=%v status=%q", matchless.Progress, matchless.DownloadStatus)
 	}
+
+	// Raw-key presence check: json.Unmarshal collapses "key absent", null, and ""
+	// into the same zero value, so the typed-DTO assertions above pass whether or
+	// not the omitempty tags are actually doing their job. Re-decode into raw
+	// maps to verify the wire shape itself: a matchless row must OMIT both keys
+	// entirely, not just carry zero values for them.
+	var raw []map[string]json.RawMessage
+	if err := json.Unmarshal(w.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("raw unmarshal: %v body=%s", err, w.Body.String())
+	}
+	var rawMatched, rawMatchless map[string]json.RawMessage
+	for _, m := range raw {
+		var clientItemID string
+		if err := json.Unmarshal(m["clientItemId"], &clientItemID); err != nil {
+			t.Fatalf("unmarshal clientItemId: %v", err)
+		}
+		switch clientItemID {
+		case "h1":
+			rawMatched = m
+		case "ghost":
+			rawMatchless = m
+		}
+	}
+	if rawMatched == nil || rawMatchless == nil {
+		t.Fatalf("raw rows not found: %+v", raw)
+	}
+	if _, ok := rawMatchless["progress"]; ok {
+		t.Fatalf("matchless row must omit \"progress\" key entirely, got: %s", rawMatchless["progress"])
+	}
+	if _, ok := rawMatchless["downloadStatus"]; ok {
+		t.Fatalf("matchless row must omit \"downloadStatus\" key entirely, got: %s", rawMatchless["downloadStatus"])
+	}
+	if _, ok := rawMatched["progress"]; !ok {
+		t.Fatalf("matched row must include \"progress\" key")
+	}
+	if _, ok := rawMatched["downloadStatus"]; !ok {
+		t.Fatalf("matched row must include \"downloadStatus\" key")
+	}
 }
 
 func TestAPINamingConfigRoundTrip(t *testing.T) {
