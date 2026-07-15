@@ -152,9 +152,9 @@ func run(ctx context.Context) error {
 	sch.Every(15*time.Minute, func() command.Command {
 		return indexer.NewHealthCheck(st, bus, &http.Client{Timeout: 30 * time.Second})
 	})
-	sch.Every(1*time.Minute, func() command.Command { return dlMonitor })
+	sch.Every(30*time.Second, func() command.Command { return dlMonitor })
 	sch.Every(12*time.Hour, func() command.Command { return mediaRefresh })
-	sch.Every(1*time.Minute, func() command.Command { return importCmd })
+	sch.Every(30*time.Second, func() command.Command { return importCmd })
 	sch.Every(time.Duration(autoCfg.MissingSearchIntervalHours)*time.Hour, func() command.Command {
 		return automation.NewMissingSearchCommand(autoSvc)
 	})
