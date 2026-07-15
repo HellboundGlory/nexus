@@ -6,6 +6,7 @@ import { useActivityInvalidation } from "./api"
 const TABS: { to: string; label: string }[] = [
   { to: "/activity/queue", label: "Queue" },
   { to: "/activity/history", label: "History" },
+  { to: "/activity/blocklist", label: "Blocklist" },
 ]
 
 export function ActivityLayout() {

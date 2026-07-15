@@ -17,6 +17,7 @@ import { GeneralSection } from "@/features/settings/GeneralSection"
 import { ActivityLayout } from "@/features/activity/ActivityLayout"
 import { QueueSection } from "@/features/activity/QueueSection"
 import { HistorySection } from "@/features/activity/HistorySection"
+import { BlocklistSection } from "@/features/activity/BlocklistSection"
 import { CalendarView } from "@/features/calendar/CalendarView"
 
 export const router = createBrowserRouter([
@@ -42,6 +43,7 @@ export const router = createBrowserRouter([
           { index: true, element: <Navigate to="/activity/queue" replace /> },
           { path: "queue", element: <QueueSection /> },
           { path: "history", element: <HistorySection /> },
+          { path: "blocklist", element: <BlocklistSection /> },
         ],
       },
       {
