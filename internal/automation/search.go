@@ -48,7 +48,10 @@ func (s *Service) searchMovie(ctx context.Context, movieID int64) (int, error) {
 		slog.Warn("automation: movie search had indexer errors", "movieId", m.ID, "err", err)
 	}
 	cands := Decide(releases, provider.KindMovie, profile)
-	blocked, _ := s.store.BlocklistedTitles(ctx, &m.ID, nil)
+	blocked, err := s.store.BlocklistedTitles(ctx, &m.ID, nil)
+	if err != nil {
+		slog.Warn("automation: blocklist lookup failed", "movieId", m.ID, "err", err)
+	}
 	cands = filterBlocklisted(cands, blocked)
 	_, grabbed, err := s.enqueueBest(ctx, cands, func(c Candidate) importing.EnqueueRequest {
 		return importing.EnqueueRequest{
@@ -243,7 +246,10 @@ func (s *Service) searchSeason(ctx context.Context, se *store.Series, seasonNumb
 				packs = append(packs, c)
 			}
 		}
-		blocked, _ := s.store.BlocklistedTitles(ctx, nil, &se.ID)
+		blocked, err := s.store.BlocklistedTitles(ctx, nil, &se.ID)
+		if err != nil {
+			slog.Warn("automation: blocklist lookup failed", "seriesId", se.ID, "season", seasonNumber, "err", err)
+		}
 		packs = filterBlocklisted(packs, blocked)
 		ids := episodeIDs(missing)
 		_, grabbed, err := s.enqueueBest(ctx, packs, func(c Candidate) importing.EnqueueRequest {
@@ -322,7 +328,10 @@ func (s *Service) searchEpisode(ctx context.Context, se *store.Series, e store.E
 			covering = append(covering, c)
 		}
 	}
-	blocked, _ := s.store.BlocklistedTitles(ctx, nil, &e.SeriesID)
+	blocked, err := s.store.BlocklistedTitles(ctx, nil, &e.SeriesID)
+	if err != nil {
+		slog.Warn("automation: blocklist lookup failed", "seriesId", e.SeriesID, "episodeId", e.ID, "err", err)
+	}
 	covering = filterBlocklisted(covering, blocked)
 	_, grabbed, err := s.enqueueBest(ctx, covering, func(c Candidate) importing.EnqueueRequest {
 		return tvRequest(se.ID, []int64{e.ID}, c)
