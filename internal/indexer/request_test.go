@@ -7,6 +7,47 @@ import (
 	"github.com/hellboundg/nexus/internal/core/provider"
 )
 
+// Scene release names are ASCII ("Pokemon.Detective.Pikachu.2019..."), but
+// metadata titles carry diacritics ("Pokémon Detective Pikachu"). Newznab
+// indexers match q literally, so an accented q returns nothing — verified
+// against NZBGeek: q="Pokémon Detective Pikachu" returned 0 items where the
+// folded spelling returned 74. The term must therefore be folded to ASCII.
+func TestBuildSearchURLFoldsAccentsInTerm(t *testing.T) {
+	raw, err := buildSearchURL("https://idx.test/", "KEY", provider.Query{
+		Type: provider.SearchMovie, Term: "Pokémon Detective Pikachu", TMDBID: 447404,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := u.Query().Get("q"), "Pokemon Detective Pikachu"; got != want {
+		t.Errorf("q = %q want %q", got, want)
+	}
+	// Folding must not disturb the id params.
+	if got := u.Query().Get("tmdbid"); got != "447404" {
+		t.Errorf("tmdbid = %q want %q", got, "447404")
+	}
+}
+
+func TestFoldTerm(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"Pokémon Detective Pikachu", "Pokemon Detective Pikachu"},
+		{"A Minecraft Movie", "A Minecraft Movie"}, // ASCII is unchanged
+		{"", ""},
+		{"Amélie", "Amelie"},
+		{"Œuvre", "Œuvre"}, // non-decomposable: left alone, not mangled
+		{"日本", "日本"},       // non-Latin passes through
+	}
+	for _, c := range cases {
+		if got := foldTerm(c.in); got != c.want {
+			t.Errorf("foldTerm(%q) = %q want %q", c.in, got, c.want)
+		}
+	}
+}
+
 func TestBuildSearchURL(t *testing.T) {
 	season, ep := 2, 5
 	q := provider.Query{
