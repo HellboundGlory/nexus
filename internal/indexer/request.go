@@ -4,9 +4,28 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"unicode"
+
+	"golang.org/x/text/runes"
+	"golang.org/x/text/transform"
+	"golang.org/x/text/unicode/norm"
 
 	"github.com/hellboundg/nexus/internal/core/provider"
 )
+
+// foldTerm strips diacritics from a search term (é→e), mirroring the arr apps'
+// RemoveAccent. Newznab indexers match q literally against scene release names,
+// which are ASCII, so an accented term finds nothing. Decomposable marks only —
+// non-decomposable letters (ø, ß, œ) and non-Latin scripts pass through
+// unchanged rather than being mangled.
+func foldTerm(s string) string {
+	out, _, err := transform.String(
+		transform.Chain(norm.NFD, runes.Remove(runes.In(unicode.Mn)), norm.NFC), s)
+	if err != nil {
+		return s
+	}
+	return out
+}
 
 // buildSearchURL constructs a Newznab/Torznab API request URL.
 func buildSearchURL(base, apiKey string, q provider.Query) (string, error) {
@@ -24,7 +43,7 @@ func buildSearchURL(base, apiKey string, q provider.Query) (string, error) {
 		v.Set("apikey", apiKey)
 	}
 	if q.Term != "" {
-		v.Set("q", q.Term)
+		v.Set("q", foldTerm(q.Term))
 	}
 	if len(q.Categories) > 0 {
 		cats := make([]string, len(q.Categories))

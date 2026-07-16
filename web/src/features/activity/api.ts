@@ -12,8 +12,17 @@ export const activityKeys = {
   blocklist: ["blocklist"] as const,
 }
 
+// /queue enriches each grabbed row with live progress from the download client
+// on every request, so this interval is what makes the progress bar advance.
+// It only polls while an Activity tab is mounted.
+const QUEUE_POLL_MS = 5_000
+
 export function useQueue() {
-  return useQuery({ queryKey: activityKeys.queue, queryFn: () => apiGet<QueueItem[]>("/queue") })
+  return useQuery({
+    queryKey: activityKeys.queue,
+    queryFn: () => apiGet<QueueItem[]>("/queue"),
+    refetchInterval: QUEUE_POLL_MS,
+  })
 }
 
 export function useHistory() {

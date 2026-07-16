@@ -154,7 +154,12 @@ func run(ctx context.Context) error {
 	})
 	sch.Every(30*time.Second, func() command.Command { return dlMonitor })
 	sch.Every(12*time.Hour, func() command.Command { return mediaRefresh })
-	sch.Every(30*time.Second, func() command.Command { return importCmd })
+	// 5s so a failed download is blocklisted and its replacement grabbed
+	// promptly. Guarded because the Manager has no dedupe and runs several
+	// workers: a run that outlasts the interval would otherwise overlap itself
+	// and could double-blocklist a failure and double-grab its replacement.
+	importTick := command.Single(importCmd)
+	sch.Every(5*time.Second, func() command.Command { return importTick })
 	sch.Every(time.Duration(autoCfg.MissingSearchIntervalHours)*time.Hour, func() command.Command {
 		return automation.NewMissingSearchCommand(autoSvc)
 	})
