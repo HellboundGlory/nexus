@@ -1801,16 +1801,40 @@ explicit user action that hits live indexers."
 
 - [ ] **Step 1: Write the failing tests**
 
-Create `web/src/features/search/InteractiveSearchDialog.test.tsx`. **Read an existing feature test first** (e.g. `web/src/features/activity/*.test.tsx`) and reuse its QueryClientProvider + ToastProvider wrapper verbatim rather than inventing one.
+Create `web/src/features/search/InteractiveSearchDialog.test.tsx`.
+
+**Harness note — this is the suite's real pattern, verified against `web/src/features/activity/api.test.tsx:1-21`. Do not invent a different one.** There is **no** shared `renderWithProviders` helper and **no** `web/src/test/utils` (only `web/src/test/setup.ts`). Each test file declares its own local `wrapper()` factory, and I/O is faked by **`vi.mock("@/lib/api")`** — *not* by mocking `fetch`. The only addition here is `ToastProvider`, which the dialog needs because `useToast` throws outside it.
 
 ```tsx
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
+import { describe, it, expect, vi, beforeEach } from "vitest"
+import type { ReactNode } from "react"
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import * as apiClient from "@/lib/api"
+import { ToastProvider } from "@/lib/toast"
 import { InteractiveSearchDialog } from "./InteractiveSearchDialog"
-import { renderWithProviders } from "@/test/utils" // reuse the existing helper; adapt the import
+import type { ScoredRelease } from "./types"
 
-const clean = {
+vi.mock("@/lib/api", async (orig) => {
+  const actual = await orig<typeof import("@/lib/api")>()
+  return { ...actual, apiGet: vi.fn(), apiPost: vi.fn() }
+})
+
+// Mirrors activity/api.test.tsx's local wrapper, plus ToastProvider (useToast
+// throws outside it).
+function wrapper() {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return function Wrapper({ children }: { children: ReactNode }) {
+    return (
+      <QueryClientProvider client={qc}>
+        <ToastProvider>{children}</ToastProvider>
+      </QueryClientProvider>
+    )
+  }
+}
+
+const clean: ScoredRelease = {
   title: "Some.Movie.2019.480p.HDTV.x264-GOOD",
   downloadUrl: "http://x/good",
   size: 1_500_000_000,
@@ -1820,9 +1844,9 @@ const clean = {
   quality: { id: 1, name: "SDTV", source: "hdtv", resolution: "480p", rank: 1 },
   score: 10,
   accepted: true,
-  rejections: [] as string[],
+  rejections: [],
 }
-const rejected = {
+const rejected: ScoredRelease = {
   ...clean,
   title: "Some.Movie.2019.1080p.WEB-DL.x264-GRP",
   downloadUrl: "http://x/rejected",
@@ -1831,80 +1855,89 @@ const rejected = {
   rejections: ["quality not in profile"],
 }
 
-function mockSearch(body: unknown, status = 200) {
-  vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
-    if (String(url).includes("/interactive")) {
-      return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } })
-    }
-    return new Response(JSON.stringify({ id: 1 }), { status: 201, headers: { "Content-Type": "application/json" } })
-  })
+function renderDialog() {
+  return render(
+    <InteractiveSearchDialog target={{ kind: "movie", id: 7 }} title="Some Movie" onOpenChange={() => {}} />,
+    { wrapper: wrapper() },
+  )
 }
 
-beforeEach(() => vi.restoreAllMocks())
-afterEach(() => vi.restoreAllMocks())
+beforeEach(() => vi.clearAllMocks())
 
 describe("InteractiveSearchDialog", () => {
   it("renders rejected rows with their reason instead of hiding them", async () => {
-    mockSearch({ releases: [clean, rejected], indexerErrors: [] })
-    renderWithProviders(
-      <InteractiveSearchDialog target={{ kind: "movie", id: 7 }} title="Some Movie" onOpenChange={() => {}} />,
-    )
+    vi.mocked(apiClient.apiGet).mockResolvedValue({ releases: [clean, rejected], indexerErrors: [] })
+    renderDialog()
+
     expect(await screen.findByText(clean.title)).toBeInTheDocument()
     expect(screen.getByText(rejected.title)).toBeInTheDocument()
     expect(screen.getByText(/quality not in profile/)).toBeInTheDocument()
   })
 
   it("grabs a clean row on click without a confirm", async () => {
-    mockSearch({ releases: [clean], indexerErrors: [] })
+    vi.mocked(apiClient.apiGet).mockResolvedValue({ releases: [clean], indexerErrors: [] })
+    vi.mocked(apiClient.apiPost).mockResolvedValue({ id: 1 })
     const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true)
-    renderWithProviders(
-      <InteractiveSearchDialog target={{ kind: "movie", id: 7 }} title="Some Movie" onOpenChange={() => {}} />,
-    )
+    renderDialog()
+
     await screen.findByText(clean.title)
     await userEvent.click(screen.getByRole("button", { name: /grab .*GOOD/i }))
 
     expect(confirmSpy).not.toHaveBeenCalled()
-    await waitFor(() => {
-      const calls = vi.mocked(globalThis.fetch).mock.calls.map((c) => String(c[0]))
-      expect(calls.some((u) => u.endsWith("/queue"))).toBe(true)
-    })
+    await waitFor(() => expect(apiClient.apiPost).toHaveBeenCalledTimes(1))
+    expect(apiClient.apiPost).toHaveBeenCalledWith("/queue", expect.objectContaining({
+      downloadUrl: "http://x/good",
+      movieId: 7,
+      force: false,
+    }))
   })
 
   it("confirms before grabbing a rejected row, and does not grab when declined", async () => {
-    mockSearch({ releases: [rejected], indexerErrors: [] })
+    vi.mocked(apiClient.apiGet).mockResolvedValue({ releases: [rejected], indexerErrors: [] })
     const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false)
-    renderWithProviders(
-      <InteractiveSearchDialog target={{ kind: "movie", id: 7 }} title="Some Movie" onOpenChange={() => {}} />,
-    )
+    renderDialog()
+
     await screen.findByText(rejected.title)
     await userEvent.click(screen.getByRole("button", { name: /grab .*GRP/i }))
 
     expect(confirmSpy).toHaveBeenCalledWith(expect.stringContaining("quality not in profile"))
-    const calls = vi.mocked(globalThis.fetch).mock.calls.map((c) => String(c[0]))
-    expect(calls.some((u) => u.endsWith("/queue"))).toBe(false)
+    expect(apiClient.apiPost).not.toHaveBeenCalled()
+  })
+
+  it("sends force=true when a rejected grab is confirmed", async () => {
+    vi.mocked(apiClient.apiGet).mockResolvedValue({ releases: [rejected], indexerErrors: [] })
+    vi.mocked(apiClient.apiPost).mockResolvedValue({ id: 1 })
+    vi.spyOn(window, "confirm").mockReturnValue(true)
+    renderDialog()
+
+    await screen.findByText(rejected.title)
+    await userEvent.click(screen.getByRole("button", { name: /grab .*GRP/i }))
+
+    await waitFor(() => expect(apiClient.apiPost).toHaveBeenCalledTimes(1))
+    expect(apiClient.apiPost).toHaveBeenCalledWith("/queue", expect.objectContaining({ force: true }))
   })
 
   it("renders the partial-indexer banner naming the failures", async () => {
-    mockSearch({ releases: [clean], indexerErrors: [{ indexerId: "nzbplanet", message: "timeout" }] })
-    renderWithProviders(
-      <InteractiveSearchDialog target={{ kind: "movie", id: 7 }} title="Some Movie" onOpenChange={() => {}} />,
-    )
+    vi.mocked(apiClient.apiGet).mockResolvedValue({
+      releases: [clean],
+      indexerErrors: [{ indexerId: "nzbplanet", message: "timeout" }],
+    })
+    renderDialog()
+
     expect(await screen.findByRole("alert")).toHaveTextContent(/nzbplanet/)
   })
 
   it("shows an error state when the search itself fails", async () => {
-    mockSearch({ error: { code: "internal", message: "search failed" } }, 500)
-    renderWithProviders(
-      <InteractiveSearchDialog target={{ kind: "movie", id: 7 }} title="Some Movie" onOpenChange={() => {}} />,
-    )
+    vi.mocked(apiClient.apiGet).mockRejectedValue(new apiClient.ApiError(500, "internal", "search failed"))
+    renderDialog()
+
     expect(await screen.findByText(/couldn't search/i)).toBeInTheDocument()
   })
 
   it("omits the seeders cell for usenet rows", async () => {
-    mockSearch({ releases: [clean], indexerErrors: [] })
-    renderWithProviders(
-      <InteractiveSearchDialog target={{ kind: "movie", id: 7 }} title="Some Movie" onOpenChange={() => {}} />,
-    )
+    vi.mocked(apiClient.apiGet).mockResolvedValue({ releases: [clean], indexerErrors: [] })
+    renderDialog()
+
     await screen.findByText(clean.title)
     expect(screen.getByTestId("seeders-cell")).toHaveTextContent("—")
   })
@@ -2324,7 +2357,7 @@ Rebuilds web/dist (committed; CI drift-checks it)."
 | §5.1 | `ScoredCandidate` | T3 |
 | §5.2 | Uniform `Rejections`, all three sources | T3 (Gap 2) |
 | §5.3 | Accepted-first sort + the present-but-not-allowed trap | T3 Steps 1, 5 (mutation-checked) |
-| §5.3 | "Row 1 == what automation would grab" | T3 Step 1 (`TestDecideAllRowOneMatchesWhatAutomationWouldGrab`, all 3 filters) |
+| §5.3 | "Row 1 == what automation would grab" | T3 Step 1 (`TestDecideAllRowOneMatchesWhatAutomationWouldGrab`, all 3 filters) — exact for **movie and episode**; see the season caveat below |
 | §5.4 | 3 synchronous GETs; grab reuses POST /queue | T5 |
 | §5.5 | Response shape; `rejections` `[]`; `seeders` absent on usenet; `quality` always present | T5 Steps 3, 6 (mutation-checked) |
 | §5.5/§7 | `indexerErrors` load-bearing + banner naming them | **T2 (Gap 1)**, T5, T7 |
@@ -2341,6 +2374,8 @@ Rebuilds web/dist (committed; CI drift-checks it)."
 **Placeholder scan:** Three deliberate `panic("implement using the existing fixtures…")` markers exist (T4 Step 1, T5 Step 1). They are **not** TBDs — they mark the one thing the plan must not guess: test fixtures whose exact helper names live in files the implementer will have open (`enqueue_test.go`, `api_test.go`). Each carries an explicit instruction to reuse the existing helpers rather than invent parallel ones, and the surrounding test bodies are complete. Two `>` callouts (T3 Step 1, T8 Step 4) instruct verification of `quality.Definitions()`/definition names and the `Episode` field names against source before implementing, with the authoritative file named.
 
 **Type consistency:** `IndexerError{IndexerID, Message}` — T2 defines, T5 embeds in `InteractiveResult`, T6 mirrors as `IndexerErrorEntry`, T7 reads `e.indexerId`/`e.message`. ✓ `ScoredCandidate{Candidate, Decision, Rejections}` — T3 defines, T5's `toScoredReleases` reads `c.Release.*`, `c.Decision.Quality/Score/Accepted`, `c.Rejections`. ✓ `Coverage`/`SeasonPackCoverage`/`EpisodeCoverage` — T3 defines, T5 consumes. ✓ `blocked map[string]string` — T1 produces, T3 consumes, T5 passes. ✓ `Force` — T4 on both `EnqueueRequest` (Go) and `enqueueBody` (`json:"force"`); T6's `GrabRequest.force`. ✓ `SearchTarget` — T6 defines with the optional `episodeIds`/`seriesId` that T8 supplies and `grabBody` reads. ✓ `activityKeys` imported from `@/features/activity/api` (T6) matches its real export at `activity/api.ts:9`. ✓
+
+**The §5.3 property is exact for movie and episode, approximate for season — deliberately.** Automation only grabs a season *pack* when the season is **fully** missing (`len(missing) == len(monitored)`, `search.go:238`); otherwise it fans out to per-episode searches. The interactive season endpoint always scores with `SeasonPackCoverage`, so on a **partially**-downloaded season, row 1 is a pack that automation would not itself have taken. This is a deliberate simplification, not a defect: the season modal's job is "show me the packs for this season", the `episodeIds` attribution still targets exactly the missing episodes, and per-episode interactive search is one click away. **Do not "strengthen" `TestDecideAllRowOneMatchesWhatAutomationWouldGrab` into a season variant** — it uses `EpisodeCoverage`, which is where the property actually holds. A season variant would encode a guarantee automation does not make.
 
 **One known asymmetry, deliberate:** `automation.ErrNoProfile` (T5) is a *new* sentinel distinct from the existing `importing.ErrNoProfile`. `automation.profileFor` signals "no profile" via `ok=false`, not an error, so automation has no such sentinel today. Both map to the same 400 `no_profile` code and the same frontend toast, so the user-visible contract is single. Do not try to share the importing one — automation importing it would be legal, but the two mean different things (`importing`'s is returned by a grab; this one by a read).
 
