@@ -14,10 +14,30 @@ import (
 	"github.com/hellboundg/nexus/internal/importing"
 )
 
+// IndexerError names one indexer that failed during an aggregated search. It
+// mirrors indexer.IndexerError's wire shape; automation declares its own copy
+// because its package contract forbids importing internal/indexer (see the
+// package doc above). The adapter at the composition root maps between them.
+type IndexerError struct {
+	IndexerID string `json:"indexerId"`
+	Message   string `json:"message"`
+}
+
 // Searcher runs an aggregated indexer search. Satisfied by an adapter over
-// *indexer.Service that returns its releases plus a non-fatal aggregate error.
+// *indexer.Service.
+//
+// Search returns the releases plus a non-fatal aggregate error, and is what the
+// automatic paths (missing sweep, RSS, upgrade) use — they only need to log that
+// something failed.
+//
+// SearchDetailed additionally names each failing indexer. Interactive search
+// needs this: rendering a short list with no explanation of which indexers were
+// missing reproduces exactly the invisibility that feature exists to remove. It
+// returns no error because a partial result is the normal case — the caller
+// surfaces the failures rather than aborting.
 type Searcher interface {
 	Search(ctx context.Context, q provider.Query) ([]provider.Release, error)
+	SearchDetailed(ctx context.Context, q provider.Query) ([]provider.Release, []IndexerError)
 }
 
 // Enqueuer decides+grabs a chosen release for a target item and records the

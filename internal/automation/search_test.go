@@ -12,14 +12,20 @@ import (
 )
 
 type fakeSearcher struct {
-	lastQuery provider.Query
-	releases  []provider.Release
-	err       error
+	lastQuery     provider.Query
+	releases      []provider.Release
+	err           error
+	indexerErrors []IndexerError
 }
 
 func (f *fakeSearcher) Search(_ context.Context, q provider.Query) ([]provider.Release, error) {
 	f.lastQuery = q
 	return f.releases, f.err
+}
+
+func (f *fakeSearcher) SearchDetailed(_ context.Context, q provider.Query) ([]provider.Release, []IndexerError) {
+	f.lastQuery = q
+	return f.releases, f.indexerErrors
 }
 
 type fakeEnqueuer struct {
@@ -358,5 +364,21 @@ func TestSearchSeasonTreatsQueuedEpisodeAsNotMissing(t *testing.T) {
 	// Not fully missing (ep1 in flight) → per-episode search, not a pack.
 	if fs.lastQuery.Episode == nil {
 		t.Fatalf("should be a per-episode search, got %+v", fs.lastQuery)
+	}
+}
+
+func TestFakeSearcherSatisfiesDetailedSearcher(t *testing.T) {
+	f := &fakeSearcher{
+		releases:      []provider.Release{{Title: "Some.Movie.2019.1080p.WEB-DL", IndexerID: "1"}},
+		indexerErrors: []IndexerError{{IndexerID: "3", Message: "timeout"}},
+	}
+	var s Searcher = f
+
+	rel, errs := s.SearchDetailed(context.Background(), provider.Query{Term: "some movie"})
+	if len(rel) != 1 || rel[0].IndexerID != "1" {
+		t.Fatalf("releases = %+v, want the one succeeding indexer's release", rel)
+	}
+	if len(errs) != 1 || errs[0].IndexerID != "3" || errs[0].Message != "timeout" {
+		t.Fatalf("indexerErrors = %+v, want the failing indexer named with its message", errs)
 	}
 }
