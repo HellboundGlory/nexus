@@ -21,6 +21,13 @@ type EnqueueRequest struct {
 	SeriesID    int64
 	EpisodeIDs  []int64
 	MovieID     int64
+	// Force skips the quality accept gate for a release the user explicitly
+	// picked in interactive search. It governs QUALITY ONLY: the blocklist is
+	// not consulted on this path at all (filterBlocklisted lives in
+	// automation.enqueueBest, not here), so force is a no-op for a blocklisted
+	// release whose quality is fine. It never skips quality RESOLUTION — a
+	// forced unparseable release still resolves to Unknown (ID 0).
+	Force bool
 }
 
 // Enqueue decides the release against the item's profile, grabs it, and writes a
@@ -32,7 +39,7 @@ func (s *Service) Enqueue(ctx context.Context, req EnqueueRequest) (store.QueueI
 	}
 	parsed := parsing.Parse(req.Title, req.MediaKind)
 	decision := quality.Decide(parsed, profile)
-	if !decision.Accepted {
+	if !decision.Accepted && !req.Force {
 		return store.QueueItem{}, ErrRejected
 	}
 	itemID, err := s.grab.Grab(ctx, provider.DownloadRequest{

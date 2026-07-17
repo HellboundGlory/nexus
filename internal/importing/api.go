@@ -81,6 +81,7 @@ type enqueueBody struct {
 	SeriesID    int64              `json:"seriesId"`
 	EpisodeIDs  []int64            `json:"episodeIds"`
 	MovieID     int64              `json:"movieId"`
+	Force       bool               `json:"force"`
 }
 
 func (a *API) enqueue(w http.ResponseWriter, r *http.Request) {
@@ -95,7 +96,8 @@ func (a *API) enqueue(w http.ResponseWriter, r *http.Request) {
 	}
 	q, err := a.svc.Enqueue(r.Context(), EnqueueRequest{
 		DownloadURL: b.DownloadURL, Title: b.Title, Protocol: b.Protocol, IndexerID: b.IndexerID,
-		ClientID: b.ClientID, MediaKind: b.MediaKind, SeriesID: b.SeriesID, EpisodeIDs: b.EpisodeIDs, MovieID: b.MovieID,
+		ClientID: b.ClientID, MediaKind: b.MediaKind, SeriesID: b.SeriesID, EpisodeIDs: b.EpisodeIDs,
+		MovieID: b.MovieID, Force: b.Force,
 	})
 	if err != nil {
 		a.writeErr(w, err)
