@@ -32,6 +32,12 @@ func (a *API) Mount(r chi.Router) {
 		r.Post("/search/series/{id}", a.searchSeries)
 		r.Post("/search/series/{id}/season/{n}", a.searchSeason)
 		r.Post("/search/episode/{id}", a.searchEpisode)
+		// Interactive reads are synchronous 200s, deliberately unlike the
+		// fire-and-forget 202s above: the modal must block on real results, and
+		// prod testing showed a 202 makes "nothing happened" ambiguous.
+		r.Get("/search/movie/{id}/interactive", a.interactiveMovie)
+		r.Get("/search/series/{id}/season/{n}/interactive", a.interactiveSeason)
+		r.Get("/search/episode/{id}/interactive", a.interactiveEpisode)
 		r.Route("/config", func(r chi.Router) {
 			r.Get("/", a.getConfig)
 			r.Put("/", a.putConfig)
@@ -127,4 +133,50 @@ func (a *API) putConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, c)
+}
+
+// writeInteractive maps the interactive entry points' errors onto the API's
+// error vocabulary and writes the result.
+func (a *API) writeInteractive(w http.ResponseWriter, res InteractiveResult, err error) {
+	switch {
+	case err == nil:
+		api.WriteJSON(w, http.StatusOK, res)
+	case errors.Is(err, ErrNoProfile):
+		api.WriteError(w, http.StatusBadRequest, "no_profile", "assign a quality profile before searching")
+	case errors.Is(err, store.ErrNotFound):
+		api.WriteError(w, http.StatusNotFound, "not_found", "not found")
+	default:
+		api.WriteError(w, http.StatusInternalServerError, "internal", "search failed")
+	}
+}
+
+func (a *API) interactiveMovie(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathInt64(r, "id")
+	if !ok {
+		api.WriteError(w, http.StatusBadRequest, "bad_request", "invalid id")
+		return
+	}
+	res, err := a.svc.InteractiveSearchMovie(r.Context(), id)
+	a.writeInteractive(w, res, err)
+}
+
+func (a *API) interactiveSeason(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathInt64(r, "id")
+	n, okN := pathInt64(r, "n")
+	if !ok || !okN {
+		api.WriteError(w, http.StatusBadRequest, "bad_request", "invalid id or season")
+		return
+	}
+	res, err := a.svc.InteractiveSearchSeason(r.Context(), id, int(n))
+	a.writeInteractive(w, res, err)
+}
+
+func (a *API) interactiveEpisode(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathInt64(r, "id")
+	if !ok {
+		api.WriteError(w, http.StatusBadRequest, "bad_request", "invalid id")
+		return
+	}
+	res, err := a.svc.InteractiveSearchEpisode(r.Context(), id)
+	a.writeInteractive(w, res, err)
 }

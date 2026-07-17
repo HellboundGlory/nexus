@@ -1,8 +1,12 @@
 package automation
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
+	"time"
 
 	"github.com/hellboundg/nexus/internal/core/provider"
 	"github.com/hellboundg/nexus/internal/core/store"
@@ -113,4 +117,146 @@ func DecideAll(releases []provider.Release, kind provider.MediaKind, profile sto
 		return compare(out[i].Candidate, out[j].Candidate, profile) > 0
 	})
 	return out
+}
+
+// ErrNoProfile is returned by the interactive entry points when the target item
+// has no quality profile assigned. DecideAll needs a profile to score against,
+// and importing.Enqueue would reject the grab anyway, so a profile-less item
+// could otherwise open a modal it could never grab from.
+var ErrNoProfile = errors.New("automation: item has no quality profile")
+
+// ScoredRelease is one row of the interactive list.
+//
+// provider.Release carries NO json tags, so this DTO spells every field out
+// rather than embedding it — the wire shape must not depend on Go field names.
+type ScoredRelease struct {
+	Title       string            `json:"title"`
+	DownloadURL string            `json:"downloadUrl"`
+	InfoURL     string            `json:"infoUrl,omitempty"`
+	Size        int64             `json:"size"`
+	IndexerID   string            `json:"indexerId"`
+	Protocol    provider.Protocol `json:"protocol"`
+	PublishDate time.Time         `json:"publishDate"`
+	// Seeders is a POINTER + omitempty: ABSENT on usenet rows, PRESENT on
+	// torrents including a real 0. Never use the numeric value as a
+	// presence discriminator (the C2 wire-shape trap).
+	Seeders *int `json:"seeders,omitempty"`
+	// Quality is always present — "Unknown" (ID 0) for an unparseable title,
+	// because quality.Resolve never fails.
+	Quality  quality.QualityDefinition `json:"quality"`
+	Score    int                       `json:"score"`
+	Accepted bool                      `json:"accepted"`
+	// Rejections is always a non-nil array. Empty means automation would have
+	// grabbed this release.
+	Rejections []string `json:"rejections"`
+}
+
+// InteractiveResult mirrors indexer.SearchResult's shape. Both arrays are
+// non-nil on the wire.
+type InteractiveResult struct {
+	Releases      []ScoredRelease `json:"releases"`
+	IndexerErrors []IndexerError  `json:"indexerErrors"`
+}
+
+func toScoredReleases(cands []ScoredCandidate) []ScoredRelease {
+	out := make([]ScoredRelease, 0, len(cands))
+	for _, c := range cands {
+		out = append(out, ScoredRelease{
+			Title:       c.Release.Title,
+			DownloadURL: c.Release.DownloadURL,
+			InfoURL:     c.Release.InfoURL,
+			Size:        c.Release.Size,
+			IndexerID:   c.Release.IndexerID,
+			Protocol:    c.Release.Protocol,
+			PublishDate: c.Release.PublishDate,
+			Seeders:     c.Release.Seeders,
+			Quality:     c.Decision.Quality,
+			Score:       c.Decision.Score,
+			Accepted:    c.Decision.Accepted,
+			Rejections:  c.Rejections,
+		})
+	}
+	return out
+}
+
+func result(cands []ScoredCandidate, errs []IndexerError) InteractiveResult {
+	if errs == nil {
+		errs = []IndexerError{}
+	}
+	return InteractiveResult{Releases: toScoredReleases(cands), IndexerErrors: errs}
+}
+
+// InteractiveSearchMovie returns every release the indexers hold for a movie,
+// each annotated with why automation would or would not grab it. Unlike
+// SearchMovie it grabs nothing, and it deliberately does NOT skip unmonitored or
+// already-filed items — the user asked for this list explicitly.
+func (s *Service) InteractiveSearchMovie(ctx context.Context, movieID int64) (InteractiveResult, error) {
+	m, err := s.store.GetMovie(ctx, movieID)
+	if err != nil {
+		return InteractiveResult{}, err
+	}
+	profile, ok, err := s.profileFor(ctx, m.QualityProfileID)
+	if err != nil {
+		return InteractiveResult{}, err
+	}
+	if !ok {
+		return InteractiveResult{}, ErrNoProfile
+	}
+	releases, idxErrs := s.search.SearchDetailed(ctx, movieQuery(m))
+	blocked, err := s.store.BlocklistedReasons(ctx, &m.ID, nil)
+	if err != nil {
+		slog.Warn("automation: interactive blocklist lookup failed", "movieId", m.ID, "err", err)
+	}
+	return result(DecideAll(releases, provider.KindMovie, profile, blocked, nil), idxErrs), nil
+}
+
+// InteractiveSearchSeason lists releases for a whole season. Coverage is the
+// season-pack predicate — the same one searchSeason applies — so a single
+// episode is shown but labelled rather than silently dropped.
+func (s *Service) InteractiveSearchSeason(ctx context.Context, seriesID int64, seasonNumber int) (InteractiveResult, error) {
+	se, err := s.store.GetSeries(ctx, seriesID)
+	if err != nil {
+		return InteractiveResult{}, err
+	}
+	profile, ok, err := s.profileFor(ctx, se.QualityProfileID)
+	if err != nil {
+		return InteractiveResult{}, err
+	}
+	if !ok {
+		return InteractiveResult{}, ErrNoProfile
+	}
+	releases, idxErrs := s.search.SearchDetailed(ctx, tvQuery(se, seasonNumber, nil))
+	blocked, err := s.store.BlocklistedReasons(ctx, nil, &se.ID)
+	if err != nil {
+		slog.Warn("automation: interactive blocklist lookup failed", "seriesId", se.ID, "err", err)
+	}
+	cands := DecideAll(releases, provider.KindTV, profile, blocked, SeasonPackCoverage(seasonNumber))
+	return result(cands, idxErrs), nil
+}
+
+// InteractiveSearchEpisode lists releases for one episode.
+func (s *Service) InteractiveSearchEpisode(ctx context.Context, episodeID int64) (InteractiveResult, error) {
+	e, err := s.store.GetEpisode(ctx, episodeID)
+	if err != nil {
+		return InteractiveResult{}, err
+	}
+	se, err := s.store.GetSeries(ctx, e.SeriesID)
+	if err != nil {
+		return InteractiveResult{}, err
+	}
+	profile, ok, err := s.profileFor(ctx, se.QualityProfileID)
+	if err != nil {
+		return InteractiveResult{}, err
+	}
+	if !ok {
+		return InteractiveResult{}, ErrNoProfile
+	}
+	ep := e.EpisodeNumber
+	releases, idxErrs := s.search.SearchDetailed(ctx, tvQuery(se, e.SeasonNumber, &ep))
+	blocked, err := s.store.BlocklistedReasons(ctx, nil, &e.SeriesID)
+	if err != nil {
+		slog.Warn("automation: interactive blocklist lookup failed", "episodeId", e.ID, "err", err)
+	}
+	cands := DecideAll(releases, provider.KindTV, profile, blocked, EpisodeCoverage(e.SeasonNumber, e.EpisodeNumber))
+	return result(cands, idxErrs), nil
 }
