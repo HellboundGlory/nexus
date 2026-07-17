@@ -10,6 +10,7 @@ import { StatusBadge, seriesBadge } from "./StatusBadge"
 import { SeasonTable } from "./SeasonTable"
 import { DetailBanner } from "./DetailBanner"
 import { InteractiveSearchDialog } from "@/features/search/InteractiveSearchDialog"
+import { missingSeasonEpisodeIds } from "@/features/search/resolve"
 import type { SearchTarget } from "@/features/search/types"
 
 export function SeriesDetail({ id }: { id: number }) {
@@ -103,7 +104,7 @@ export function SeriesDetail({ id }: { id: number }) {
             kind: "season",
             seriesId: id,
             seasonNumber,
-            episodeIds: s.episodes.filter((e) => e.seasonNumber === seasonNumber && e.monitored && !e.hasFile).map((e) => e.id),
+            episodeIds: missingSeasonEpisodeIds(s.episodes, seasonNumber),
           })
         }}
         onInteractiveEpisode={(e) => {

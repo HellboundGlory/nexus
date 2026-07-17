@@ -2,6 +2,7 @@
 // Pure display + request-shaping logic for interactive search. No rendering, no
 // I/O — mirrors activity/resolve.ts so the rules are unit-testable in isolation.
 import type { ScoredRelease, SearchTarget, GrabRequest } from "./types"
+import type { Episode } from "@/features/library/types"
 
 export function interactivePath(t: SearchTarget): string {
   switch (t.kind) {
@@ -54,6 +55,16 @@ export function formatAge(iso: string, now: Date = new Date()): string {
 // on a blocklisted or non-covering row whose quality is fine, force is a no-op —
 // Enqueue would have accepted it anyway. Sending it uniformly keeps the client
 // rule simple without overstating what the server enforces.
+// The episode ids an interactive SEASON grab must be attributed to: every
+// monitored episode of that season that has no file yet — the same set the
+// automatic season search enqueues a pack against. A season queue row with no
+// episode ids could never import, so this is load-bearing, not cosmetic.
+export function missingSeasonEpisodeIds(episodes: Episode[], seasonNumber: number): number[] {
+  return episodes
+    .filter((e) => e.seasonNumber === seasonNumber && e.monitored && !e.hasFile)
+    .map((e) => e.id)
+}
+
 export function grabBody(r: ScoredRelease, target: SearchTarget): GrabRequest {
   const base = {
     downloadUrl: r.downloadUrl,

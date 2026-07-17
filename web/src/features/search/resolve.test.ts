@@ -1,9 +1,10 @@
 import { describe, it, expect } from "vitest"
 import {
   interactivePath, formatSize, formatAge, rowTone,
-  rejectionSummary, needsConfirm, grabBody,
+  rejectionSummary, needsConfirm, grabBody, missingSeasonEpisodeIds,
 } from "./resolve"
 import type { ScoredRelease } from "./types"
+import type { Episode } from "@/features/library/types"
 
 function release(over: Partial<ScoredRelease> = {}): ScoredRelease {
   return {
@@ -75,6 +76,61 @@ describe("formatAge", () => {
   it("formats days", () => expect(formatAge("2026-07-15T00:00:00Z", now)).toBe("2d"))
   it("formats hours", () => expect(formatAge("2026-07-16T20:00:00Z", now)).toBe("4h"))
   it("handles an empty date", () => expect(formatAge("", now)).toBe("—"))
+})
+
+function episode(over: Partial<Episode> = {}): Episode {
+  return {
+    id: 1,
+    seriesId: 3,
+    seasonNumber: 1,
+    episodeNumber: 1,
+    tmdbId: 100,
+    title: "Episode",
+    overview: "",
+    airDate: "2026-01-01T00:00:00Z",
+    monitored: true,
+    hasFile: false,
+    ...over,
+  }
+}
+
+describe("missingSeasonEpisodeIds", () => {
+  it("excludes episodes from a different season", () => {
+    const episodes = [
+      episode({ id: 1, seasonNumber: 1 }),
+      episode({ id: 2, seasonNumber: 2 }),
+    ]
+    expect(missingSeasonEpisodeIds(episodes, 1)).toEqual([1])
+  })
+
+  it("excludes unmonitored episodes", () => {
+    const episodes = [
+      episode({ id: 1, seasonNumber: 1, monitored: true }),
+      episode({ id: 2, seasonNumber: 1, monitored: false }),
+    ]
+    expect(missingSeasonEpisodeIds(episodes, 1)).toEqual([1])
+  })
+
+  it("excludes episodes that already have a file", () => {
+    const episodes = [
+      episode({ id: 1, seasonNumber: 1, hasFile: false }),
+      episode({ id: 2, seasonNumber: 1, hasFile: true }),
+    ]
+    expect(missingSeasonEpisodeIds(episodes, 1)).toEqual([1])
+  })
+
+  it("returns ids, not episode objects, in list order", () => {
+    const episodes = [
+      episode({ id: 5, seasonNumber: 1 }),
+      episode({ id: 3, seasonNumber: 1 }),
+      episode({ id: 9, seasonNumber: 1 }),
+    ]
+    expect(missingSeasonEpisodeIds(episodes, 1)).toEqual([5, 3, 9])
+  })
+
+  it("returns an empty array for empty input", () => {
+    expect(missingSeasonEpisodeIds([], 1)).toEqual([])
+  })
 })
 
 describe("grabBody", () => {
