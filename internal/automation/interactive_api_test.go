@@ -87,6 +87,111 @@ func TestInteractiveMovieNotFoundReturns404(t *testing.T) {
 	}
 }
 
+func TestInteractiveSeasonReturnsPackAndAnnotatesNonCoveringEpisode(t *testing.T) {
+	// hdProfile allows ONLY WEBDL-1080p(7) and Bluray-1080p(9), so both releases
+	// below are quality-accepted — the only thing that can separate them is
+	// SeasonPackCoverage. The pack (right season, no episode numbers) covers;
+	// the single episode does not.
+	// Input order is deliberately single-episode-first, pack-second: this proves
+	// the pack reaching row 1 is coverage annotation doing the sorting, not
+	// input order.
+	fs := &fakeSearcher{
+		releases: []provider.Release{
+			{Title: "The.Show.S01E03.1080p.WEB-DL.x264-GRP", IndexerID: "1", DownloadURL: "http://x/ep", Protocol: provider.ProtocolUsenet},
+			{Title: "The.Show.S01.1080p.WEB-DL.x264-GRP", IndexerID: "1", DownloadURL: "http://x/pack", Protocol: provider.ProtocolUsenet},
+		},
+	}
+	r, st := newInteractiveAPI(t, fs)
+	sid, _ := seedSeries(t, st, true, 3)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/automation/search/series/"+itoa(sid)+"/season/1/interactive", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
+	}
+
+	var res InteractiveResult
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Releases) != 2 {
+		t.Fatalf("want both releases incl. the non-covering one, got %d", len(res.Releases))
+	}
+	if res.Releases[0].DownloadURL != "http://x/pack" || len(res.Releases[0].Rejections) != 0 {
+		t.Fatalf("row 1 must be the covering season pack with no rejections, got %+v", res.Releases[0])
+	}
+	if len(res.Releases[1].Rejections) == 0 {
+		t.Fatal("row 2 (single episode) must carry a coverage rejection reason, not be dropped")
+	}
+}
+
+func TestInteractiveSeasonUnknownSeriesReturns404(t *testing.T) {
+	r, _ := newInteractiveAPI(t, &fakeSearcher{})
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/automation/search/series/99999/season/1/interactive", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+}
+
+func TestInteractiveSeasonBadSeasonParamReturns400(t *testing.T) {
+	r, st := newInteractiveAPI(t, &fakeSearcher{})
+	sid, _ := seedSeries(t, st, true, 1)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/automation/search/series/"+itoa(sid)+"/season/abc/interactive", nil))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 for an unparseable season param", rec.Code)
+	}
+}
+
+func TestInteractiveEpisodeReturnsCoveringReleaseAndAnnotatesOther(t *testing.T) {
+	// Both releases are 1080p WEB-DL, so quality accepts both — only
+	// EpisodeCoverage can separate them. Feed the non-covering episode (E01)
+	// first so the covering one (E03) reaching row 1 proves the coverage
+	// annotation sorted it there, not input order.
+	fs := &fakeSearcher{
+		releases: []provider.Release{
+			{Title: "The.Show.S01E01.1080p.WEB-DL.x264-GRP", IndexerID: "1", DownloadURL: "http://x/other", Protocol: provider.ProtocolUsenet},
+			{Title: "The.Show.S01E03.1080p.WEB-DL.x264-GRP", IndexerID: "1", DownloadURL: "http://x/target", Protocol: provider.ProtocolUsenet},
+		},
+	}
+	r, st := newInteractiveAPI(t, fs)
+	_, epIDs := seedSeries(t, st, true, 3)
+	targetEpID := epIDs[2] // episode 3, matching S01E03 above
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/automation/search/episode/"+itoa(targetEpID)+"/interactive", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
+	}
+
+	var res InteractiveResult
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Releases) != 2 {
+		t.Fatalf("want both releases incl. the non-covering one, got %d", len(res.Releases))
+	}
+	if res.Releases[0].DownloadURL != "http://x/target" || len(res.Releases[0].Rejections) != 0 {
+		t.Fatalf("row 1 must be the covering S01E03 release with no rejections, got %+v", res.Releases[0])
+	}
+	if len(res.Releases[1].Rejections) == 0 {
+		t.Fatal("row 2 (non-covering episode) must carry a coverage rejection reason, not be dropped")
+	}
+}
+
+func TestInteractiveEpisodeUnknownEpisodeReturns404(t *testing.T) {
+	r, _ := newInteractiveAPI(t, &fakeSearcher{})
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/automation/search/episode/99999/interactive", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+}
+
 // WIRE SHAPE — assert on the raw JSON map, never a typed round-trip. Go collapses
 // absent/null/zero into the zero value, so a typed unmarshal cannot tell "key
 // absent" from "zero value" and this guard would pass regardless of omitempty,
