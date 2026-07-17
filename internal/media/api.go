@@ -74,6 +74,8 @@ func writeMediaError(w http.ResponseWriter, err error) {
 		api.WriteError(w, http.StatusConflict, "conflict", err.Error())
 	case errors.Is(err, ErrInvalidRootFolder):
 		api.WriteError(w, http.StatusBadRequest, "bad_request", err.Error())
+	case errors.Is(err, ErrInvalidQualityProfile):
+		api.WriteError(w, http.StatusBadRequest, "bad_request", err.Error())
 	case errors.Is(err, ErrProviderNotConfigured):
 		api.WriteError(w, http.StatusBadRequest, "not_configured", err.Error())
 	case errors.Is(err, ErrProviderUnavailable):
@@ -194,9 +196,10 @@ func (a *API) calendar(w http.ResponseWriter, r *http.Request) {
 }
 
 type addSeriesBody struct {
-	TMDBID        int    `json:"tmdbId"`
-	RootFolderID  *int64 `json:"rootFolderId"`
-	MonitorOption string `json:"monitorOption"`
+	TMDBID           int    `json:"tmdbId"`
+	RootFolderID     *int64 `json:"rootFolderId"`
+	MonitorOption    string `json:"monitorOption"`
+	QualityProfileID *int64 `json:"qualityProfileId"`
 }
 
 func (a *API) addSeries(w http.ResponseWriter, r *http.Request) {
@@ -212,7 +215,9 @@ func (a *API) addSeries(w http.ResponseWriter, r *http.Request) {
 	if b.MonitorOption == "" {
 		b.MonitorOption = MonitorAll
 	}
-	se, err := a.svc.AddSeries(r.Context(), AddSeriesRequest{TMDBID: b.TMDBID, RootFolderID: b.RootFolderID, MonitorOption: b.MonitorOption})
+	se, err := a.svc.AddSeries(r.Context(), AddSeriesRequest{
+		TMDBID: b.TMDBID, RootFolderID: b.RootFolderID, MonitorOption: b.MonitorOption, QualityProfileID: b.QualityProfileID,
+	})
 	if err != nil {
 		writeMediaError(w, err)
 		return
@@ -421,9 +426,10 @@ func (a *API) monitorEpisode(w http.ResponseWriter, r *http.Request) {
 }
 
 type addMovieBody struct {
-	TMDBID       int    `json:"tmdbId"`
-	RootFolderID *int64 `json:"rootFolderId"`
-	Monitored    bool   `json:"monitored"`
+	TMDBID           int    `json:"tmdbId"`
+	RootFolderID     *int64 `json:"rootFolderId"`
+	Monitored        bool   `json:"monitored"`
+	QualityProfileID *int64 `json:"qualityProfileId"`
 }
 
 func (a *API) addMovie(w http.ResponseWriter, r *http.Request) {
@@ -436,7 +442,9 @@ func (a *API) addMovie(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "bad_request", "tmdbId is required")
 		return
 	}
-	m, err := a.svc.AddMovie(r.Context(), AddMovieRequest{TMDBID: b.TMDBID, RootFolderID: b.RootFolderID, Monitored: b.Monitored})
+	m, err := a.svc.AddMovie(r.Context(), AddMovieRequest{
+		TMDBID: b.TMDBID, RootFolderID: b.RootFolderID, Monitored: b.Monitored, QualityProfileID: b.QualityProfileID,
+	})
 	if err != nil {
 		writeMediaError(w, err)
 		return

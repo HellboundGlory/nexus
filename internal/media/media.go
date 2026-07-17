@@ -34,15 +34,17 @@ type MovieUpdated struct {
 func (MovieUpdated) Name() string { return "media.movie.updated" }
 
 type AddSeriesRequest struct {
-	TMDBID        int
-	RootFolderID  *int64
-	MonitorOption string
+	TMDBID           int
+	RootFolderID     *int64
+	MonitorOption    string
+	QualityProfileID *int64
 }
 
 type AddMovieRequest struct {
-	TMDBID       int
-	RootFolderID *int64
-	Monitored    bool
+	TMDBID           int
+	RootFolderID     *int64
+	Monitored        bool
+	QualityProfileID *int64
 }
 
 // Service owns all library mutations over the store and a metadata provider.
@@ -121,6 +123,21 @@ func (s *Service) validateRootFolder(ctx context.Context, id *int64) error {
 	return nil
 }
 
+// validateQualityProfile mirrors validateRootFolder: nil is allowed (no profile),
+// an unknown id surfaces ErrInvalidQualityProfile (→400).
+func (s *Service) validateQualityProfile(ctx context.Context, id *int64) error {
+	if id == nil {
+		return nil
+	}
+	if _, err := s.store.GetQualityProfile(ctx, *id); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return ErrInvalidQualityProfile
+		}
+		return err
+	}
+	return nil
+}
+
 func (s *Service) AddRootFolder(ctx context.Context, path string) (store.RootFolder, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
@@ -141,6 +158,9 @@ func (s *Service) AddSeries(ctx context.Context, req AddSeriesRequest) (store.Se
 	if err := s.validateRootFolder(ctx, req.RootFolderID); err != nil {
 		return store.Series{}, err
 	}
+	if err := s.validateQualityProfile(ctx, req.QualityProfileID); err != nil {
+		return store.Series{}, err
+	}
 	md, err := s.meta.TVDetails(ctx, req.TMDBID)
 	if err != nil {
 		return store.Series{}, err
@@ -148,7 +168,7 @@ func (s *Service) AddSeries(ctx context.Context, req AddSeriesRequest) (store.Se
 	id, err := s.store.CreateSeries(ctx, store.Series{
 		TMDBID: md.TMDBID, Title: md.Title, SortTitle: sortTitle(md.Title), Overview: md.Overview,
 		Status: md.Status, FirstAired: md.FirstAired, PosterURL: md.PosterURL, FanartURL: md.FanartURL,
-		RootFolderID: req.RootFolderID, Monitored: req.MonitorOption != MonitorNone,
+		RootFolderID: req.RootFolderID, QualityProfileID: req.QualityProfileID, Monitored: req.MonitorOption != MonitorNone,
 	})
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -183,6 +203,9 @@ func (s *Service) AddMovie(ctx context.Context, req AddMovieRequest) (store.Movi
 	if err := s.validateRootFolder(ctx, req.RootFolderID); err != nil {
 		return store.Movie{}, err
 	}
+	if err := s.validateQualityProfile(ctx, req.QualityProfileID); err != nil {
+		return store.Movie{}, err
+	}
 	md, err := s.meta.MovieDetails(ctx, req.TMDBID)
 	if err != nil {
 		return store.Movie{}, err
@@ -190,7 +213,8 @@ func (s *Service) AddMovie(ctx context.Context, req AddMovieRequest) (store.Movi
 	id, err := s.store.CreateMovie(ctx, store.Movie{
 		TMDBID: md.TMDBID, Title: md.Title, SortTitle: sortTitle(md.Title), Overview: md.Overview,
 		Status: md.Status, Year: md.Year, ReleaseDate: md.ReleaseDate, Runtime: md.Runtime, IMDbID: md.IMDbID,
-		PosterURL: md.PosterURL, FanartURL: md.FanartURL, RootFolderID: req.RootFolderID, Monitored: req.Monitored,
+		PosterURL: md.PosterURL, FanartURL: md.FanartURL, RootFolderID: req.RootFolderID,
+		QualityProfileID: req.QualityProfileID, Monitored: req.Monitored,
 	})
 	if err != nil {
 		if isUniqueViolation(err) {

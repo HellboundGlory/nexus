@@ -2,6 +2,7 @@ package media
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/hellboundg/nexus/internal/core/database"
@@ -104,6 +105,48 @@ func TestAddSeriesInvalidRootFolder(t *testing.T) {
 	}
 }
 
+func TestAddSeriesWithQualityProfile(t *testing.T) {
+	fp := &fakeProvider{series: sampleSeries()}
+	svc, st := newTestService(t, fp)
+	ctx := context.Background()
+
+	rf, err := svc.AddRootFolder(ctx, "/data/tv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	prof, err := st.CreateQualityProfile(ctx, store.QualityProfile{
+		Name: "HD", CutoffQualityID: 9, UpgradeAllowed: true,
+		Items: []store.QualityProfileItem{{QualityID: 9, Allowed: true}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	se, err := svc.AddSeries(ctx, AddSeriesRequest{
+		TMDBID: 100, RootFolderID: &rf.ID, MonitorOption: MonitorAll, QualityProfileID: &prof.ID,
+	})
+	if err != nil {
+		t.Fatalf("AddSeries: %v", err)
+	}
+	if se.QualityProfileID == nil || *se.QualityProfileID != prof.ID {
+		t.Fatalf("qualityProfileId = %v, want %d", se.QualityProfileID, prof.ID)
+	}
+}
+
+func TestAddSeriesUnknownQualityProfileRejected(t *testing.T) {
+	fp := &fakeProvider{series: sampleSeries()}
+	svc, _ := newTestService(t, fp)
+	ctx := context.Background()
+	bogus := int64(99999)
+
+	_, err := svc.AddSeries(ctx, AddSeriesRequest{
+		TMDBID: 100, MonitorOption: MonitorAll, QualityProfileID: &bogus,
+	})
+	if !errors.Is(err, ErrInvalidQualityProfile) {
+		t.Fatalf("err = %v, want ErrInvalidQualityProfile", err)
+	}
+}
+
 func TestAddMovie(t *testing.T) {
 	fp := &fakeProvider{movies: sampleMovies()}
 	svc, _ := newTestService(t, fp)
@@ -113,6 +156,64 @@ func TestAddMovie(t *testing.T) {
 	}
 	if m.Title != "Film" || !m.Monitored {
 		t.Fatalf("unexpected: %+v", m)
+	}
+}
+
+func TestAddMovieWithQualityProfile(t *testing.T) {
+	fp := &fakeProvider{movies: sampleMovies()}
+	svc, st := newTestService(t, fp)
+	ctx := context.Background()
+
+	rf, err := svc.AddRootFolder(ctx, "/data/movies")
+	if err != nil {
+		t.Fatal(err)
+	}
+	prof, err := st.CreateQualityProfile(ctx, store.QualityProfile{
+		Name: "HD", CutoffQualityID: 9, UpgradeAllowed: true,
+		Items: []store.QualityProfileItem{{QualityID: 9, Allowed: true}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	m, err := svc.AddMovie(ctx, AddMovieRequest{
+		TMDBID: 200, RootFolderID: &rf.ID, Monitored: true, QualityProfileID: &prof.ID,
+	})
+	if err != nil {
+		t.Fatalf("AddMovie: %v", err)
+	}
+	if m.QualityProfileID == nil || *m.QualityProfileID != prof.ID {
+		t.Fatalf("qualityProfileId = %v, want %d", m.QualityProfileID, prof.ID)
+	}
+}
+
+func TestAddMovieUnknownQualityProfileRejected(t *testing.T) {
+	fp := &fakeProvider{movies: sampleMovies()}
+	svc, _ := newTestService(t, fp)
+	ctx := context.Background()
+	bogus := int64(99999)
+
+	_, err := svc.AddMovie(ctx, AddMovieRequest{
+		TMDBID: 200, Monitored: true, QualityProfileID: &bogus,
+	})
+	if !errors.Is(err, ErrInvalidQualityProfile) {
+		t.Fatalf("err = %v, want ErrInvalidQualityProfile", err)
+	}
+}
+
+func TestAddMovieWithoutQualityProfileStaysNil(t *testing.T) {
+	fp := &fakeProvider{movies: sampleMovies()}
+	svc, _ := newTestService(t, fp)
+	ctx := context.Background()
+
+	m, err := svc.AddMovie(ctx, AddMovieRequest{
+		TMDBID: 200, Monitored: true, // QualityProfileID omitted
+	})
+	if err != nil {
+		t.Fatalf("AddMovie: %v", err)
+	}
+	if m.QualityProfileID != nil {
+		t.Fatalf("qualityProfileId = %v, want nil (additive guarantee)", m.QualityProfileID)
 	}
 }
 
