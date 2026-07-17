@@ -1,3 +1,4 @@
+import { useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { useToast } from "@/lib/toast"
 import {
@@ -7,6 +8,8 @@ import {
 import { Select } from "@/components/ui/select"
 import { StatusBadge, movieBadge } from "./StatusBadge"
 import { DetailBanner } from "./DetailBanner"
+import { InteractiveSearchDialog } from "@/features/search/InteractiveSearchDialog"
+import type { SearchTarget } from "@/features/search/types"
 
 export function MovieDetail({ id }: { id: number }) {
   const nav = useNavigate()
@@ -18,6 +21,7 @@ export function MovieDetail({ id }: { id: number }) {
   const refresh = useRefresh(libraryKeys.movie(id))
   const del = useDelete()
   const search = useSearch()
+  const [searchTarget, setSearchTarget] = useState<SearchTarget | null>(null)
 
   if (q.isLoading) return <div className="p-6 text-sm text-[var(--color-muted)]">Loading…</div>
   if (q.isError || !q.data) {
@@ -62,6 +66,19 @@ export function MovieDetail({ id }: { id: number }) {
             Search
           </button>
           <button
+            onClick={() => {
+              // DecideAll needs a profile to score against and Enqueue would
+              // reject the grab anyway, so a profile-less item must not open a
+              // modal it could never grab from. Same guard, same wording as the
+              // auto-Search button above.
+              if (!m.qualityProfileId) { toast("Assign a quality profile before searching", { variant: "error" }); return }
+              setSearchTarget({ kind: "movie", id })
+            }}
+            className="rounded-md border border-[var(--color-border)] px-3 py-1.5 text-sm"
+          >
+            Interactive
+          </button>
+          <button
             onClick={() => { refresh.mutate({ kind: "movie", id }); toast("Refresh started") }}
             className="rounded-md border border-[var(--color-border)] px-3 py-1.5 text-sm"
           >
@@ -90,6 +107,12 @@ export function MovieDetail({ id }: { id: number }) {
           </div>
         </div>
       </DetailBanner>
+
+      <InteractiveSearchDialog
+        target={searchTarget}
+        title={m.title}
+        onOpenChange={(open) => { if (!open) setSearchTarget(null) }}
+      />
     </div>
   )
 }

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { MemoryRouter } from "react-router-dom"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { ToastProvider } from "@/lib/toast"
 import { MovieDetail } from "@/features/library/MovieDetail"
 import * as lib from "@/features/library/api"
@@ -29,12 +30,15 @@ function renderMovie(id: number, movie: object, search = vi.fn()) {
   vi.mocked(lib.useRefresh).mockReturnValue(mut())
   vi.mocked(lib.useDelete).mockReturnValue(mut())
   vi.mocked(lib.useSearch).mockReturnValue(mut({ mutate: search }))
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   render(
-    <MemoryRouter>
-      <ToastProvider>
-        <MovieDetail id={id} />
-      </ToastProvider>
-    </MemoryRouter>,
+    <QueryClientProvider client={qc}>
+      <MemoryRouter>
+        <ToastProvider>
+          <MovieDetail id={id} />
+        </ToastProvider>
+      </MemoryRouter>
+    </QueryClientProvider>,
   )
   return search
 }

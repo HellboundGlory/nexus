@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { MemoryRouter } from "react-router-dom"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { ToastProvider } from "@/lib/toast"
 import { SeriesDetail } from "@/features/library/SeriesDetail"
 import * as lib from "@/features/library/api"
@@ -41,18 +42,21 @@ describe("SeriesDetail", () => {
     vi.mocked(lib.useDelete).mockReturnValue(mut())
     vi.mocked(lib.useSearch).mockReturnValue(mut({ mutate: search }))
 
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     render(
-      <MemoryRouter>
-        <ToastProvider>
-          <SeriesDetail id={3} />
-        </ToastProvider>
-      </MemoryRouter>,
+      <QueryClientProvider client={qc}>
+        <MemoryRouter>
+          <ToastProvider>
+            <SeriesDetail id={3} />
+          </ToastProvider>
+        </MemoryRouter>
+      </QueryClientProvider>,
     )
     expect(screen.getByText("The Bear")).toBeInTheDocument()
     expect(screen.getByText("System")).toBeInTheDocument()
     expect(screen.getByText("Hands")).toBeInTheDocument()
     // per-episode search buttons; click the second episode's
-    const searchButtons = screen.getAllByRole("button", { name: /search episode/i })
+    const searchButtons = screen.getAllByRole("button", { name: /^search episode/i })
     await userEvent.click(searchButtons[1])
     expect(search).toHaveBeenCalledWith({ kind: "episode", id: 102 })
   })
@@ -74,12 +78,15 @@ describe("SeriesDetail", () => {
     vi.mocked(lib.useDelete).mockReturnValue(mut())
     vi.mocked(lib.useSearch).mockReturnValue(mut({ mutate: search }))
 
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     render(
-      <MemoryRouter>
-        <ToastProvider>
-          <SeriesDetail id={3} />
-        </ToastProvider>
-      </MemoryRouter>,
+      <QueryClientProvider client={qc}>
+        <MemoryRouter>
+          <ToastProvider>
+            <SeriesDetail id={3} />
+          </ToastProvider>
+        </MemoryRouter>
+      </QueryClientProvider>,
     )
     await userEvent.click(screen.getByRole("button", { name: /^search$/i }))
     expect(search).not.toHaveBeenCalled()

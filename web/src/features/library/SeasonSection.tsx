@@ -3,7 +3,7 @@ import { useState } from "react"
 import { StatusBadge } from "./StatusBadge"
 
 export function SeasonSection({
-  title, withFile, total, monitored, defaultOpen, onToggleMonitor, onSearch, children,
+  title, withFile, total, monitored, defaultOpen, onToggleMonitor, onSearch, onInteractive, children,
 }: {
   title: string
   withFile: number
@@ -12,6 +12,7 @@ export function SeasonSection({
   defaultOpen: boolean
   onToggleMonitor: () => void
   onSearch: () => void
+  onInteractive: () => void
   children: React.ReactNode
 }) {
   const [open, setOpen] = useState(defaultOpen)
@@ -30,6 +31,7 @@ export function SeasonSection({
         </button>
         <div className="flex items-center gap-2">
           <button onClick={onSearch} className="text-xs text-[var(--color-brand)]">Search season</button>
+          <button onClick={onInteractive} className="text-xs text-[var(--color-brand)]">Interactive</button>
           <label className="flex items-center gap-1 text-xs text-[var(--color-muted)]">
             <input type="checkbox" checked={monitored} onChange={onToggleMonitor} /> monitor
           </label>
