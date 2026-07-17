@@ -149,28 +149,31 @@ New files under `web/src/features/settings/`:
 - Fetch media-defaults and quality profiles alongside the existing root-folder fetch.
 - When a result is picked, initialise `rootFolderId` and a **new** `qualityProfileId`
   state from the per-kind defaults (blank if the default is unset or came back `null`).
-- Render a **Quality profile** `Select` beneath the root-folder select. **A profile
-  is required to add, and there is no "None" option** — the point is to eliminate the
-  profile-less add that the Wave B guard-toast exists to catch:
-  - The select lists the live profiles only. If the per-kind default profile is set,
-    it is **pre-selected**; the user may leave it or choose another.
-  - If no default is set (or it came back `null`/stale), the select shows a
-    non-selectable "Select a profile…" placeholder and the **Add button is disabled
-    until a profile is chosen** — in addition to the existing root-folder gating.
-  - If **no quality profiles exist at all**, show a hint ("No quality profile
-    configured — add one in Settings") and keep Add disabled, mirroring the existing
-    no-root-folders guard.
-- Send `qualityProfileId` in the `addMovie` / `addSeries` mutation. Because the UI
-  gates on it, the submitted value is always a real id — the UI never sends `null`.
+- **Both the root folder and the quality profile are required to add, and neither has
+  a selectable "None" option** — the point is to eliminate the profile-less (and
+  folder-less) add that the Wave B guard-toast exists to catch. Each control behaves
+  identically:
+  - The select lists only the live options. If the per-kind default is set, it is
+    **pre-selected**; the user may leave it or choose another.
+  - If the default is unset (or came back `null`/stale), the select shows a
+    non-selectable "Select…" placeholder and the **Add button stays disabled until a
+    value is chosen**.
+  - If **no options exist at all** (no root folders, or no quality profiles), show a
+    hint ("No root folder configured…" / "No quality profile configured — add one in
+    Settings") in place of the select and keep Add disabled.
+  - Add is enabled only when **both** a root folder and a profile are selected.
+- Send both `rootFolderId` and `qualityProfileId` in the `addMovie` / `addSeries`
+  mutation. Because the UI gates on both, the submitted values are always real ids —
+  the UI never sends `null` for either.
 
-Note the split: the **server** keeps `qualityProfileId` optional (§4.3 additive), so
-non-UI callers (RSS, tests) still create profile-less items. The requirement is a UI
-affordance, not a server constraint. Root folder in the dialog is unchanged by this
-feature — pre-seeded from its default, but not newly required.
+Note the split: the **server** keeps both `rootFolderId` and `qualityProfileId`
+optional (§4.3 additive — `validateRootFolder(nil)` / `validateQualityProfile(nil)`
+both pass), so non-UI callers (RSS, tests) are unaffected. The requirement is a UI
+affordance, not a server constraint.
 
 `AddMovieBody` / `AddSeriesBody` (`web/src/features/library/types.ts`) and the
-`useAddMovie` / `useAddSeries` mutations gain the `qualityProfileId` field
-(typed `number | null` for wire symmetry, though the dialog always sends a number).
+`useAddMovie` / `useAddSeries` mutations carry `rootFolderId` and `qualityProfileId`
+(typed `number | null` for wire symmetry, though the dialog always sends numbers).
 
 ## 6. Error handling
 
@@ -180,8 +183,9 @@ feature — pre-seeded from its default, but not newly required.
 | PUT with an unknown root folder / profile id | `400 bad_request`, field named, nothing written |
 | Add with an unknown `qualityProfileId` | `400` (`ErrInvalidQualityProfile`), item not created |
 | Add with `qualityProfileId` omitted / null (server-side, non-UI caller) | item created profile-less, as today (additive) |
-| Add dialog, no profile selected | Add button disabled; cannot submit without a profile |
-| Add dialog, no quality profiles configured | hint shown, Add disabled (mirrors the no-root-folders guard) |
+| Add dialog, no root folder or no profile selected | Add button disabled; cannot submit without both |
+| Add dialog, no root folders configured | "No root folder configured…" hint shown, Add disabled |
+| Add dialog, no quality profiles configured | "No quality profile configured…" hint shown, Add disabled |
 | Settings, no root folders / no profiles | those dropdowns show only "None"; the default can't be set |
 
 ## 7. Testing
@@ -206,9 +210,10 @@ feature — pre-seeded from its default, but not newly required.
 - Add dialog: with defaults set, picking a result pre-selects the matching root
   folder and profile; overriding either changes what the mutation sends; the add
   mutation body carries `qualityProfileId`.
-- Add dialog, profile required: with **no** default profile, Add is disabled until a
-  profile is chosen, then enabled; with **no profiles configured**, the hint renders
-  and Add stays disabled. No selectable "None" in the profile dropdown.
+- Add dialog, root folder + profile both required: with **no** default for a control,
+  Add is disabled until that control is chosen, then enabled once **both** are set;
+  with **no options configured** for a control, its hint renders and Add stays
+  disabled. Neither dropdown offers a selectable "None".
 - `web/dist` rebuild (committed; CI drift-checks it).
 
 ## 8. Deferred

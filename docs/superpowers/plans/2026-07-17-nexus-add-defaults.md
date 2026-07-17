@@ -912,7 +912,7 @@ Rebuilds web/dist (committed; CI drift-checks it)."
 
 ---
 
-### Task 4: Add dialog — profile dropdown + defaults pre-seed
+### Task 4: Add dialog — required root folder + profile, defaults pre-seed
 
 **Files:**
 - Modify: `web/src/features/library/types.ts` (add-body fields), `web/src/features/library/AddMediaDialog.tsx`, `web/src/features/library/AddMediaDialog.test.tsx`, `web/dist`
@@ -1007,6 +1007,30 @@ it("requires a profile: Add is disabled until one is chosen when there is no def
   expect(mutateAsync).toHaveBeenCalledWith({ tmdbId: 1, rootFolderId: 1, monitored: true, qualityProfileId: 5 })
 })
 
+it("requires a root folder: Add is disabled until one is chosen when there is no default", async () => {
+  stub()
+  const mutateAsync = vi.fn().mockResolvedValue({})
+  vi.mocked(lib.useAddMovie).mockReturnValue({ mutateAsync, isPending: false } as unknown as ReturnType<typeof lib.useAddMovie>)
+  vi.mocked(lib.useRootFolders).mockReturnValue({ data: [{ id: 1, path: "/media/movies", createdAt: "" }] } as unknown as ReturnType<typeof lib.useRootFolders>)
+  // profile default present (5), but no root-folder default
+  vi.mocked(md.useMediaDefaults).mockReturnValue({ data: { movie: { rootFolderId: null, qualityProfileId: 5 }, tv: { rootFolderId: null, qualityProfileId: null } } } as unknown as ReturnType<typeof md.useMediaDefaults>)
+  render(
+    <ToastProvider>
+      <AddMediaDialog kind="movie" open onOpenChange={() => {}} />
+    </ToastProvider>,
+  )
+  await userEvent.type(screen.getByPlaceholderText(/search/i), "dune")
+  await userEvent.click(await screen.findByText("Dune"))
+
+  // profile satisfied by the default, but no root folder → Add disabled
+  expect(screen.getByRole("button", { name: /add movie/i })).toBeDisabled()
+
+  await userEvent.selectOptions(screen.getByLabelText("Root folder"), "1")
+  expect(screen.getByRole("button", { name: /add movie/i })).toBeEnabled()
+  await userEvent.click(screen.getByRole("button", { name: /add movie/i }))
+  expect(mutateAsync).toHaveBeenCalledWith({ tmdbId: 1, rootFolderId: 1, monitored: true, qualityProfileId: 5 })
+})
+
 it("shows a hint and disables Add when no quality profiles are configured", async () => {
   stub()
   vi.mocked(lib.useRootFolders).mockReturnValue({ data: [{ id: 1, path: "/media/movies", createdAt: "" }] } as unknown as ReturnType<typeof lib.useRootFolders>)
@@ -1069,10 +1093,10 @@ Add a `noProfiles` derived flag near the existing `noRoots` (`const noRoots = (r
   const noProfiles = (qualityProfiles.data ?? []).length === 0
 ```
 
-Send the profile in `submit()`. The UI gates on a profile being selected, so `qualityProfileId` is always a real id here — send it as a number:
+Send both ids in `submit()`. The UI gates on **both** a root folder and a profile being selected, so both are always real ids here — send them as numbers:
 
 ```tsx
-    const rfId = rootFolderId ? Number(rootFolderId) : null
+    const rfId = Number(rootFolderId) // gated non-empty by the Add button
     const qpId = Number(qualityProfileId) // gated non-empty by the Add button
     try {
       if (kind === "movie") {
@@ -1083,6 +1107,21 @@ Send the profile in `submit()`. The UI gates on a profile being selected, so `qu
 ```
 
 Reset it in `reset()`: add `setQualityProfileId("")`.
+
+**Root folder — remove the selectable "None".** The existing root-folder `Select` (inside the `noRoots ? hint : Select` conditional) has a blank `<option value="">Select…</option>`. Replace it with the same disabled-placeholder pattern so a root folder cannot be un-selected:
+
+```tsx
+          {noRoots ? (
+            <p className="text-sm text-[var(--color-warn)]">No root folder configured — add one in Settings.</p>
+          ) : (
+            <Select aria-label="Root folder" value={rootFolderId} onChange={setRootFolderId}>
+              {!rootFolderId && <option value="" disabled>Select a folder…</option>}
+              {(rootFolders.data ?? []).map((rf) => (
+                <option key={rf.id} value={rf.id}>{rf.path}</option>
+              ))}
+            </Select>
+          )}
+```
 
 Render the Quality profile control beneath the root-folder select (before the monitor block). **No selectable "None"** — a disabled placeholder shows only when nothing is chosen, and the whole control is replaced by a hint when no profiles exist:
 
@@ -1100,12 +1139,12 @@ Render the Quality profile control beneath the root-folder select (before the mo
           )}
 ```
 
-The placeholder is `disabled`, so once a profile is chosen it cannot be re-selected — there is no way to return to "no profile" (that is the point of removing "None").
+Both placeholders are `disabled`, so once a value is chosen it cannot be re-selected back to empty — there is no way to return to "none" for either the root folder or the profile (that is the point of removing "None").
 
-Gate the Add button on a profile being selected, alongside the existing `noRoots`/`pending`. Change the button's `disabled`:
+Gate the Add button on **both** a root folder and a profile being selected, alongside the existing `pending` and the no-options guards. Change the button's `disabled`:
 
 ```tsx
-              disabled={noRoots || noProfiles || pending || !qualityProfileId}
+              disabled={noRoots || noProfiles || pending || !rootFolderId || !qualityProfileId}
 ```
 
 > Cross-feature import note: the library dialog importing a config read hook from `@/features/settings/mediaDefaultsApi` is deliberate — media-defaults is settings-owned config that the add flow consumes. This mirrors the dialog already importing `ApiError` from `@/lib/api`.
@@ -1127,15 +1166,16 @@ Expected: build succeeds; whole FE suite green; tsc 0; Go build green (it embeds
 
 ```bash
 git add web/src/features/library/ web/dist
-git commit -m "feat(webui): required quality-profile dropdown + default pre-seed in Add dialog
+git commit -m "feat(webui): required root folder + quality profile in Add dialog
 
-The Add dialog gains a required Quality profile dropdown (absent before),
-pre-selected from the per-kind default and with no 'None' option: the user
-leaves the default or picks another, and Add is disabled until a profile is
-selected. Root folder is likewise pre-seeded from its default. The add
-request now carries qualityProfileId, so an added item is born with its
+The Add dialog gains a required Quality profile dropdown (absent before) and
+makes the root folder required too. Both are pre-selected from the per-kind
+default, neither offers a 'None' option, and Add stays disabled until both
+are selected: the user leaves the defaults or picks others. When a control
+has no configured options, a hint replaces it and Add stays disabled. The
+add request now carries qualityProfileId, so an added item is born with its
 profile instead of needing a separate assignment. This removes the
-profile-less add the Wave B guard-toast exists to catch.
+folder-less / profile-less add the Wave B guard-toast exists to catch.
 
 Rebuilds web/dist."
 ```
@@ -1155,8 +1195,8 @@ Rebuilds web/dist."
 | §4.3 | `qualityProfileId` threaded through Add, additive | T1 |
 | §4.3 | `ErrInvalidQualityProfile` → 400 | T1 |
 | §5.1 | Media Management tab, four dropdowns, "None" | T3 |
-| §5.2 | Add dialog profile dropdown, **required, no "None", pre-seeded** + send | T4 (Step 4 gating + placeholder; Step 2 tests: pre-seed/enabled, no-default→disabled-until-picked, no-profiles→hint+disabled) |
-| §6 | Error handling (stale → blank, unknown id → 400, no profile → Add disabled, no profiles → hint) | T1, T2, T4 |
+| §5.2 | Add dialog root folder + profile, **both required, no "None", pre-seeded** + send | T4 (Step 4 gating + both placeholders; Step 2 tests: pre-seed/enabled, no-default-root→disabled-until-picked, no-default-profile→disabled-until-picked, no-roots→hint, no-profiles→hint) |
+| §6 | Error handling (stale → blank, unknown id → 400, no root/profile → Add disabled, no options → hint) | T1, T2, T4 |
 | §7 | Go tests incl. wire-shape via RawMessage; FE tests; dist rebuild | T2 (wire-shape), T3, T4 |
 
 **Placeholder scan:** The only deferred-to-implementer items are the real fixture-helper names in T1/T2 (`newMediaTestService`/`mustRootFolder`/`mustQualityProfile`) — each flagged with an instruction to use the file's existing helpers rather than invent, with a concrete fallback (`CreateRootFolder`/`CreateQualityProfile`) if none exists. No TBD/TODO/"add validation" placeholders.
