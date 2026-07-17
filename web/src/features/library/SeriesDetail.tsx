@@ -1,3 +1,4 @@
+import { useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { useToast } from "@/lib/toast"
 import {
@@ -8,6 +9,9 @@ import { Select } from "@/components/ui/select"
 import { StatusBadge, seriesBadge } from "./StatusBadge"
 import { SeasonTable } from "./SeasonTable"
 import { DetailBanner } from "./DetailBanner"
+import { InteractiveSearchDialog } from "@/features/search/InteractiveSearchDialog"
+import { missingSeasonEpisodeIds } from "@/features/search/resolve"
+import type { SearchTarget } from "@/features/search/types"
 
 export function SeriesDetail({ id }: { id: number }) {
   const nav = useNavigate()
@@ -19,6 +23,8 @@ export function SeriesDetail({ id }: { id: number }) {
   const refresh = useRefresh(libraryKeys.seriesDetail(id))
   const del = useDelete()
   const search = useSearch()
+  const [searchTarget, setSearchTarget] = useState<SearchTarget | null>(null)
+  const [searchTitle, setSearchTitle] = useState("")
 
   if (q.isLoading) return <div className="p-6 text-sm text-[var(--color-muted)]">Loading…</div>
   if (q.isError || !q.data) {
@@ -88,6 +94,30 @@ export function SeriesDetail({ id }: { id: number }) {
         onToggleEpisode={(e) => setMon.mutate({ target: { kind: "episode", id: e.id }, monitored: !e.monitored })}
         onSearchSeason={(seasonNumber) => { search.mutate({ kind: "season", seriesId: id, seasonNumber }); toast(`Search started for season ${seasonNumber}`) }}
         onSearchEpisode={(e) => { search.mutate({ kind: "episode", id: e.id }); toast(`Search started for ${e.title}`) }}
+        onInteractiveSeason={(seasonNumber) => {
+          if (!s.qualityProfileId) { toast("Assign a quality profile before searching", { variant: "error" }); return }
+          setSearchTitle(`${s.title} — season ${seasonNumber}`)
+          // episodeIds attribute the grab: a season queue row with no episode ids
+          // can never import. Send every monitored episode without a file, the
+          // same set searchSeason enqueues a pack against.
+          setSearchTarget({
+            kind: "season",
+            seriesId: id,
+            seasonNumber,
+            episodeIds: missingSeasonEpisodeIds(s.episodes, seasonNumber),
+          })
+        }}
+        onInteractiveEpisode={(e) => {
+          if (!s.qualityProfileId) { toast("Assign a quality profile before searching", { variant: "error" }); return }
+          setSearchTitle(e.title)
+          setSearchTarget({ kind: "episode", id: e.id, seriesId: id })
+        }}
+      />
+
+      <InteractiveSearchDialog
+        target={searchTarget}
+        title={searchTitle}
+        onOpenChange={(open) => { if (!open) setSearchTarget(null) }}
       />
     </div>
   )

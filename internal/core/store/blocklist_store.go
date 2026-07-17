@@ -123,3 +123,34 @@ func (s *Store) BlocklistedTitles(ctx context.Context, movieID, seriesID *int64)
 	}
 	return out, rows.Err()
 }
+
+// BlocklistedReasons is BlocklistedTitles carrying the reason text, for callers
+// that must explain *why* a release is blocked rather than just drop it (the
+// interactive search list). Scoping matches BlocklistedTitles exactly.
+func (s *Store) BlocklistedReasons(ctx context.Context, movieID, seriesID *int64) (map[string]string, error) {
+	out := map[string]string{}
+	var (
+		rows *sql.Rows
+		err  error
+	)
+	switch {
+	case movieID != nil:
+		rows, err = s.db.QueryContext(ctx, `SELECT norm_title, reason FROM blocklist WHERE movie_id = ?`, *movieID)
+	case seriesID != nil:
+		rows, err = s.db.QueryContext(ctx, `SELECT norm_title, reason FROM blocklist WHERE series_id = ?`, *seriesID)
+	default:
+		return out, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var t, reason string
+		if err := rows.Scan(&t, &reason); err != nil {
+			return nil, err
+		}
+		out[t] = reason
+	}
+	return out, rows.Err()
+}

@@ -246,11 +246,13 @@ func (a dlQueueAdapter) Remove(ctx context.Context, clientID, itemID string, del
 	return a.svc.Remove(ctx, clientID, itemID, deleteData)
 }
 
-// autoSearchAdapter flattens indexer.Service.Search's SearchResult into the
-// ([]provider.Release, error) shape automation.Searcher expects, without
-// importing the indexer package into internal/automation. Per-indexer errors are
-// surfaced as a non-fatal aggregate error; the releases that succeeded are still
-// returned.
+// autoSearchAdapter bridges indexer.Service.Search's SearchResult to the shapes
+// automation.Searcher expects, without importing the indexer package into
+// internal/automation.
+//
+// Search flattens per-indexer errors into a non-fatal aggregate error; the
+// releases that succeeded are still returned. SearchDetailed preserves each
+// failing indexer's id and message so interactive search can name them.
 type autoSearchAdapter struct{ svc *indexer.Service }
 
 func (a autoSearchAdapter) Search(ctx context.Context, q provider.Query) ([]provider.Release, error) {
@@ -259,4 +261,13 @@ func (a autoSearchAdapter) Search(ctx context.Context, q provider.Query) ([]prov
 		return res.Releases, fmt.Errorf("automation: %d indexer error(s)", len(res.IndexerErrors))
 	}
 	return res.Releases, nil
+}
+
+func (a autoSearchAdapter) SearchDetailed(ctx context.Context, q provider.Query) ([]provider.Release, []automation.IndexerError) {
+	res := a.svc.Search(ctx, q)
+	errs := make([]automation.IndexerError, 0, len(res.IndexerErrors))
+	for _, e := range res.IndexerErrors {
+		errs = append(errs, automation.IndexerError{IndexerID: e.IndexerID, Message: e.Message})
+	}
+	return res.Releases, errs
 }

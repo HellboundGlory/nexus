@@ -125,3 +125,89 @@ func TestEnqueueRejectsDisallowedQuality(t *testing.T) {
 		t.Fatalf("no row should be written on reject, got %d", len(all))
 	}
 }
+
+func TestEnqueueForceSkipsRejectedGate(t *testing.T) {
+	svc, st := newSvc(t)
+	ctx := context.Background()
+	sid, epID := seedSeriesWithProfile(t, st)
+
+	got, err := svc.Enqueue(ctx, EnqueueRequest{
+		DownloadURL: "http://x/nzb", Title: "The.Show.S01E01.2160p.BluRay.x265-GRP",
+		Protocol: provider.ProtocolUsenet, MediaKind: provider.KindTV,
+		SeriesID: sid, EpisodeIDs: []int64{epID}, Force: true,
+	})
+	if err != nil {
+		t.Fatalf("force=true must skip the accept gate, got %v", err)
+	}
+	if got.ID == 0 {
+		t.Fatal("force grab must write a tracked queue row")
+	}
+	if got.Status != store.QueueGrabbed {
+		t.Fatalf("status = %q, want grabbed", got.Status)
+	}
+}
+
+// The additive guarantee: every existing caller omits Force, and must keep its
+// current behaviour exactly. This is the case most likely to regress.
+func TestEnqueueWithoutForceStillRejects(t *testing.T) {
+	svc, st := newSvc(t)
+	ctx := context.Background()
+	sid, epID := seedSeriesWithProfile(t, st)
+
+	_, err := svc.Enqueue(ctx, EnqueueRequest{
+		DownloadURL: "http://x/nzb", Title: "The.Show.S01E01.2160p.BluRay.x265-GRP",
+		Protocol: provider.ProtocolUsenet, MediaKind: provider.KindTV,
+		SeriesID: sid, EpisodeIDs: []int64{epID},
+		// Force omitted — defaults false
+	})
+	if !errors.Is(err, ErrRejected) {
+		t.Fatalf("err = %v, want ErrRejected when force is omitted", err)
+	}
+}
+
+// quality.Resolve never fails: unresolvable input falls back to definitions[0] =
+// Unknown (ID 0). So a forced grab of a title nothing can parse gets QualityID 0
+// — a real defined quality — not a null or a crash. Force skips the accept GATE,
+// never the quality RESOLUTION.
+func TestEnqueueForceUnparseableGetsQualityIDZero(t *testing.T) {
+	svc, st := newSvc(t)
+	ctx := context.Background()
+	sid, epID := seedSeriesWithProfile(t, st)
+
+	got, err := svc.Enqueue(ctx, EnqueueRequest{
+		DownloadURL: "http://x/nzb", Title: "zzzz",
+		Protocol: provider.ProtocolUsenet, MediaKind: provider.KindTV,
+		SeriesID: sid, EpisodeIDs: []int64{epID}, Force: true,
+	})
+	if err != nil {
+		t.Fatalf("force grab of an unparseable title must succeed, got %v", err)
+	}
+	if got.QualityID != 0 {
+		t.Fatalf("QualityID = %d, want 0 (Unknown)", got.QualityID)
+	}
+}
+
+// A forced grab must be a TRACKED grab — queue row AND history. That is the
+// whole reason C3 uses importing.Enqueue rather than downloadclient.Grab, which
+// writes neither and would never import.
+func TestEnqueueForceWritesHistory(t *testing.T) {
+	svc, st := newSvc(t)
+	ctx := context.Background()
+	sid, epID := seedSeriesWithProfile(t, st)
+
+	if _, err := svc.Enqueue(ctx, EnqueueRequest{
+		DownloadURL: "http://x/nzb", Title: "The.Show.S01E01.2160p.BluRay.x265-GRP",
+		Protocol: provider.ProtocolUsenet, MediaKind: provider.KindTV,
+		SeriesID: sid, EpisodeIDs: []int64{epID}, Force: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	hist, err := st.ListHistory(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hist) != 1 || hist[0].EventType != "grabbed" {
+		t.Fatalf("history = %+v, want one grabbed event", hist)
+	}
+}

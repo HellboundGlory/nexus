@@ -64,3 +64,58 @@ func TestBlocklistCRUDAndScope(t *testing.T) {
 		t.Fatalf("remove missing: want ErrNotFound, got %v", err)
 	}
 }
+
+func TestBlocklistedReasonsScopedByMovie(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+
+	movieID, err := st.CreateMovie(ctx, Movie{TMDBID: 7, Title: "Some Movie"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherID, err := st.CreateMovie(ctx, Movie{TMDBID: 8, Title: "Other Movie"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := st.AddBlocklist(ctx, Blocklist{
+		MediaKind: "movie", MovieID: &movieID,
+		SourceTitle: "Some.Movie.2019.1080p.WEB-DL", Protocol: "usenet",
+		QualityID: 3, Reason: "Not on your server(s)",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AddBlocklist(ctx, Blocklist{
+		MediaKind: "movie", MovieID: &otherID,
+		SourceTitle: "Other.Movie.2020.1080p.WEB-DL", Protocol: "usenet",
+		QualityID: 3, Reason: "Aborted, cannot be completed",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := st.BlocklistedReasons(ctx, &movieID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("want 1 entry scoped to movie %d, got %d: %v", movieID, len(got), got)
+	}
+	key := NormReleaseTitle("Some.Movie.2019.1080p.WEB-DL")
+	if got[key] != "Not on your server(s)" {
+		t.Fatalf("reason for %q = %q, want %q", key, got[key], "Not on your server(s)")
+	}
+}
+
+func TestBlocklistedReasonsNoTargetReturnsEmptyNonNil(t *testing.T) {
+	st := newTestStore(t)
+	got, err := st.BlocklistedReasons(context.Background(), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil {
+		t.Fatal("want a non-nil empty map, got nil")
+	}
+	if len(got) != 0 {
+		t.Fatalf("want empty map, got %v", got)
+	}
+}

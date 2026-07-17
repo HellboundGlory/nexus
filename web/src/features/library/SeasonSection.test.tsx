@@ -7,7 +7,7 @@ function renderOne(defaultOpen: boolean, onSearch = vi.fn(), onToggleMonitor = v
   render(
     <SeasonSection
       title="Specials" withFile={0} total={3} monitored
-      defaultOpen={defaultOpen} onSearch={onSearch} onToggleMonitor={onToggleMonitor}
+      defaultOpen={defaultOpen} onSearch={onSearch} onToggleMonitor={onToggleMonitor} onInteractive={() => {}}
     >
       <li>episode-body</li>
     </SeasonSection>,
