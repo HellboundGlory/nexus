@@ -146,16 +146,31 @@ New files under `web/src/features/settings/`:
 
 `web/src/features/library/AddMediaDialog.tsx`:
 
-- Fetch media-defaults alongside the existing root-folder fetch.
-- When a result is picked, initialise `rootFolderId` and a **new**
-  `qualityProfileId` state from the per-kind defaults (blank if the default is unset
-  or came back `null`).
-- Render a **Quality profile** `Select` beneath the root-folder select — same style,
-  a "Select…" blank option plus the live profiles. Overridable.
-- Send `qualityProfileId` (nullable) in the `addMovie` / `addSeries` mutation.
+- Fetch media-defaults and quality profiles alongside the existing root-folder fetch.
+- When a result is picked, initialise `rootFolderId` and a **new** `qualityProfileId`
+  state from the per-kind defaults (blank if the default is unset or came back `null`).
+- Render a **Quality profile** `Select` beneath the root-folder select. **A profile
+  is required to add, and there is no "None" option** — the point is to eliminate the
+  profile-less add that the Wave B guard-toast exists to catch:
+  - The select lists the live profiles only. If the per-kind default profile is set,
+    it is **pre-selected**; the user may leave it or choose another.
+  - If no default is set (or it came back `null`/stale), the select shows a
+    non-selectable "Select a profile…" placeholder and the **Add button is disabled
+    until a profile is chosen** — in addition to the existing root-folder gating.
+  - If **no quality profiles exist at all**, show a hint ("No quality profile
+    configured — add one in Settings") and keep Add disabled, mirroring the existing
+    no-root-folders guard.
+- Send `qualityProfileId` in the `addMovie` / `addSeries` mutation. Because the UI
+  gates on it, the submitted value is always a real id — the UI never sends `null`.
+
+Note the split: the **server** keeps `qualityProfileId` optional (§4.3 additive), so
+non-UI callers (RSS, tests) still create profile-less items. The requirement is a UI
+affordance, not a server constraint. Root folder in the dialog is unchanged by this
+feature — pre-seeded from its default, but not newly required.
 
 `AddMovieBody` / `AddSeriesBody` (`web/src/features/library/types.ts`) and the
-`useAddMovie` / `useAddSeries` mutations gain the optional `qualityProfileId`.
+`useAddMovie` / `useAddSeries` mutations gain the `qualityProfileId` field
+(typed `number | null` for wire symmetry, though the dialog always sends a number).
 
 ## 6. Error handling
 
@@ -164,8 +179,10 @@ New files under `web/src/features/settings/`:
 | GET, stored default id was deleted | that field returns `null`; dialog blank (§4.2) |
 | PUT with an unknown root folder / profile id | `400 bad_request`, field named, nothing written |
 | Add with an unknown `qualityProfileId` | `400` (`ErrInvalidQualityProfile`), item not created |
-| Add with `qualityProfileId` omitted / null | item created profile-less, as today |
-| No root folders / no profiles configured | dropdowns show only "None"; defaults can't be set; Add dialog keeps its existing no-roots guard |
+| Add with `qualityProfileId` omitted / null (server-side, non-UI caller) | item created profile-less, as today (additive) |
+| Add dialog, no profile selected | Add button disabled; cannot submit without a profile |
+| Add dialog, no quality profiles configured | hint shown, Add disabled (mirrors the no-root-folders guard) |
+| Settings, no root folders / no profiles | those dropdowns show only "None"; the default can't be set |
 
 ## 7. Testing
 
@@ -189,6 +206,9 @@ New files under `web/src/features/settings/`:
 - Add dialog: with defaults set, picking a result pre-selects the matching root
   folder and profile; overriding either changes what the mutation sends; the add
   mutation body carries `qualityProfileId`.
+- Add dialog, profile required: with **no** default profile, Add is disabled until a
+  profile is chosen, then enabled; with **no profiles configured**, the hint renders
+  and Add stays disabled. No selectable "None" in the profile dropdown.
 - `web/dist` rebuild (committed; CI drift-checks it).
 
 ## 8. Deferred
