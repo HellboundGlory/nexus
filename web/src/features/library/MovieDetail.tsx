@@ -3,13 +3,14 @@ import { useNavigate } from "react-router-dom"
 import { useToast } from "@/lib/toast"
 import {
   useMovieDetail, useQualityProfiles, useSetMonitored, useAssignProfile,
-  useRefresh, useDelete, useSearch, libraryKeys,
+  useRefresh, useDelete, useSearch, useDeleteMovieFile, libraryKeys,
 } from "./api"
 import { Select } from "@/components/ui/select"
 import { StatusBadge, movieBadge } from "./StatusBadge"
 import { DetailBanner } from "./DetailBanner"
 import { InteractiveSearchDialog } from "@/features/search/InteractiveSearchDialog"
 import type { SearchTarget } from "@/features/search/types"
+import { formatSize } from "@/features/search/resolve"
 
 export function MovieDetail({ id }: { id: number }) {
   const nav = useNavigate()
@@ -21,6 +22,7 @@ export function MovieDetail({ id }: { id: number }) {
   const refresh = useRefresh(libraryKeys.movie(id))
   const del = useDelete()
   const search = useSearch()
+  const delFile = useDeleteMovieFile()
   const [searchTarget, setSearchTarget] = useState<SearchTarget | null>(null)
 
   if (q.isLoading) return <div className="p-6 text-sm text-[var(--color-muted)]">Loading…</div>
@@ -28,7 +30,7 @@ export function MovieDetail({ id }: { id: number }) {
     return (
       <div className="p-6">
         <p className="text-sm text-[var(--color-muted)]">Not found.</p>
-        <button onClick={() => nav("/movies")} className="mt-3 text-sm text-[var(--color-brand)]">← Back to Movies</button>
+        <button onClick={() => nav("/movies")} className="mt-3 text-sm text-[var(--color-brand)] rounded hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)]">← Back to Movies</button>
       </div>
     )
   }
@@ -41,7 +43,7 @@ export function MovieDetail({ id }: { id: number }) {
         fanartUrl={m.fanartUrl}
         posterUrl={m.posterUrl}
         title={m.title}
-        back={<button onClick={() => nav("/movies")} className="text-sm text-[var(--color-brand)]">← Movies</button>}
+        back={<button onClick={() => nav("/movies")} className="text-sm text-[var(--color-brand)] rounded hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)]">← Movies</button>}
       >
         <div className="flex items-center gap-3">
           <h2 className="text-2xl font-bold">{m.title}</h2>
@@ -107,6 +109,31 @@ export function MovieDetail({ id }: { id: number }) {
           </div>
         </div>
       </DetailBanner>
+
+      {m.file ? (
+        <div className="mt-6 rounded-lg border border-[var(--color-border)] p-4">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <p className="truncate font-medium">{m.file.relativePath.split("/").pop()}</p>
+              <p className="mt-1 text-sm text-[var(--color-muted)]">
+                {m.file.quality ? <span>{m.file.quality} · </span> : null}
+                {formatSize(m.file.size)} · added {new Date(m.file.addedAt).toLocaleDateString()}
+              </p>
+              <p className="mt-1 truncate text-xs text-[var(--color-muted)]">{m.file.relativePath}</p>
+            </div>
+            <button
+              onClick={() => {
+                if (confirm("Delete this file from disk?")) {
+                  delFile.mutate(id, { onSuccess: () => toast("File deleted") })
+                }
+              }}
+              className="shrink-0 rounded-md border border-[var(--color-warn)] px-3 py-1.5 text-sm text-[var(--color-warn)]"
+            >
+              Delete file
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       <InteractiveSearchDialog
         target={searchTarget}

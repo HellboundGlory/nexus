@@ -13,6 +13,7 @@ import (
 	"github.com/hellboundg/nexus/internal/core/api"
 	"github.com/hellboundg/nexus/internal/core/provider"
 	"github.com/hellboundg/nexus/internal/core/store"
+	"github.com/hellboundg/nexus/internal/quality"
 )
 
 type API struct {
@@ -46,6 +47,7 @@ func (a *API) Mount(r chi.Router) {
 		r.Post("/", a.addMovie)
 		r.Get("/{id}", a.getMovie)
 		r.Delete("/{id}", a.deleteMovie)
+		r.Delete("/{id}/file", a.deleteMovieFile)
 		r.Post("/{id}/refresh", a.refreshMovie)
 		r.Put("/{id}/monitor", a.monitorMovie)
 		r.Put("/{id}/qualityprofile", a.assignMovieProfile)
@@ -454,9 +456,32 @@ func (a *API) addMovie(w http.ResponseWriter, r *http.Request) {
 	api.WriteJSON(w, http.StatusCreated, m)
 }
 
+type movieFileDTO struct {
+	RelativePath string    `json:"relativePath"`
+	Size         int64     `json:"size"`
+	QualityID    int       `json:"qualityId"`
+	Quality      string    `json:"quality"`
+	AddedAt      time.Time `json:"addedAt"`
+}
+
 type movieDTO struct {
 	store.Movie
-	HasFile bool `json:"hasFile"`
+	HasFile bool          `json:"hasFile"`
+	File    *movieFileDTO `json:"file,omitempty"`
+}
+
+func movieFile(f *store.MediaFile) *movieFileDTO {
+	if f == nil {
+		return nil
+	}
+	name := ""
+	if def, ok := quality.DefinitionByID(f.QualityID); ok {
+		name = def.Name
+	}
+	return &movieFileDTO{
+		RelativePath: f.RelativePath, Size: f.Size, QualityID: f.QualityID,
+		Quality: name, AddedAt: f.AddedAt,
+	}
 }
 
 func (a *API) listMovies(w http.ResponseWriter, r *http.Request) {
@@ -496,7 +521,12 @@ func (a *API) getMovie(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusInternalServerError, "internal", "failed to load movie")
 		return
 	}
-	api.WriteJSON(w, http.StatusOK, movieDTO{Movie: *m, HasFile: files[m.ID]})
+	file, err := a.store.MediaFileForMovie(r.Context(), id)
+	if err != nil {
+		api.WriteError(w, http.StatusInternalServerError, "internal", "failed to load movie")
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, movieDTO{Movie: *m, HasFile: files[m.ID], File: movieFile(file)})
 }
 
 func (a *API) deleteMovie(w http.ResponseWriter, r *http.Request) {
@@ -506,6 +536,18 @@ func (a *API) deleteMovie(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := a.store.DeleteMovie(r.Context(), id); err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "internal", "failed to delete movie")
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (a *API) deleteMovieFile(w http.ResponseWriter, r *http.Request) {
+	id, ok := mediaID(w, r)
+	if !ok {
+		return
+	}
+	if err := a.svc.DeleteMovieFile(r.Context(), id); err != nil {
+		writeMediaError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})

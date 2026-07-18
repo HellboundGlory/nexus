@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/hellboundg/nexus/internal/core/store"
+	"github.com/hellboundg/nexus/internal/quality"
 )
 
 func newTestAPI(t *testing.T, fp *fakeProvider) (http.Handler, *store.Store) {
@@ -348,5 +349,103 @@ func TestAPICalendar(t *testing.T) {
 	r.ServeHTTP(w, req)
 	if strings.TrimSpace(w.Body.String()) != "[]" {
 		t.Fatalf("empty window body=%q want []", w.Body.String())
+	}
+}
+
+func TestGetMovieIncludesFile(t *testing.T) {
+	fp := &fakeProvider{movies: sampleMovies()}
+	r, st := newTestAPI(t, fp)
+	ctx := context.Background()
+
+	rf, err := st.CreateRootFolder(ctx, "/data/movies")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mid, err := st.CreateMovie(ctx, store.Movie{TMDBID: 200, Title: "Film", RootFolderID: &rf})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.UpsertMediaFile(ctx, store.MediaFile{
+		MediaKind: "movie", MovieID: &mid, RelativePath: "Film (2020)/Film.2020.1080p.mkv",
+		Size: 8455160320, QualityID: 9,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/movies/"+strconv.FormatInt(mid, 10), nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
+	}
+
+	var got struct {
+		HasFile bool `json:"hasFile"`
+		File    *struct {
+			RelativePath string `json:"relativePath"`
+			Size         int64  `json:"size"`
+			QualityID    int    `json:"qualityId"`
+			Quality      string `json:"quality"`
+		} `json:"file"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if !got.HasFile || got.File == nil {
+		t.Fatalf("want hasFile+file, got %+v", got)
+	}
+	if got.File.Size != 8455160320 || got.File.QualityID != 9 {
+		t.Fatalf("file fields wrong: %+v", got.File)
+	}
+	wantName, _ := quality.DefinitionByID(9)
+	if got.File.Quality != wantName.Name {
+		t.Fatalf("quality name = %q want %q", got.File.Quality, wantName.Name)
+	}
+}
+
+func TestGetMovieOmitsFileWhenAbsent(t *testing.T) {
+	fp := &fakeProvider{movies: sampleMovies()}
+	r, st := newTestAPI(t, fp)
+	mid, err := st.CreateMovie(context.Background(), store.Movie{TMDBID: 200, Title: "Film"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/movies/"+strconv.FormatInt(mid, 10), nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(w.Body.Bytes(), &raw); err != nil {
+		t.Fatal(err)
+	}
+	if _, present := raw["file"]; present {
+		t.Fatalf("file key must be absent when no media file, got %s", w.Body.String())
+	}
+}
+
+func TestDeleteMovieFileRoute(t *testing.T) {
+	fp := &fakeProvider{movies: sampleMovies()}
+	r, st := newTestAPI(t, fp)
+	ctx := context.Background()
+	mid, err := st.CreateMovie(ctx, store.Movie{TMDBID: 200, Title: "Film"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.UpsertMediaFile(ctx, store.MediaFile{
+		MediaKind: "movie", MovieID: &mid, RelativePath: "a/b.mkv", Size: 1, QualityID: 9,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodDelete, "/movies/"+strconv.FormatInt(mid, 10)+"/file", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
+	}
+	f, _ := st.MediaFileForMovie(ctx, mid)
+	if f != nil {
+		t.Fatal("file row should be gone after DELETE")
 	}
 }

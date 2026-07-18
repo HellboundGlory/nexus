@@ -31,7 +31,7 @@ export function SeriesDetail({ id }: { id: number }) {
     return (
       <div className="p-6">
         <p className="text-sm text-[var(--color-muted)]">Not found.</p>
-        <button onClick={() => nav("/tv")} className="mt-3 text-sm text-[var(--color-brand)]">← Back to TV Shows</button>
+        <button onClick={() => nav("/tv")} className="mt-3 text-sm text-[var(--color-brand)] rounded hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)]">← Back to TV Shows</button>
       </div>
     )
   }
@@ -44,7 +44,7 @@ export function SeriesDetail({ id }: { id: number }) {
         fanartUrl={s.fanartUrl}
         posterUrl={s.posterUrl}
         title={s.title}
-        back={<button onClick={() => nav("/tv")} className="text-sm text-[var(--color-brand)]">← TV Shows</button>}
+        back={<button onClick={() => nav("/tv")} className="text-sm text-[var(--color-brand)] rounded hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)]">← TV Shows</button>}
       >
         <div className="flex items-center gap-3">
           <h2 className="text-2xl font-bold">{s.title}</h2>

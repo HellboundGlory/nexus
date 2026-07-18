@@ -5,6 +5,9 @@ package media
 import (
 	"context"
 	"errors"
+	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -411,6 +414,36 @@ func (s *Service) SetMovieQualityProfile(ctx context.Context, movieID, profileID
 	}
 	pid := profileID
 	if err := s.store.SetMovieQualityProfileID(ctx, movieID, &pid); err != nil {
+		return err
+	}
+	s.emitMovie(ctx, movieID)
+	return nil
+}
+
+// DeleteMovieFile removes a movie's imported file: best-effort disk removal
+// (real errors logged, never fatal; already-gone counts as success) then the
+// DB row is always deleted, flipping the movie back to missing. No-op (nil)
+// when the movie has no file.
+func (s *Service) DeleteMovieFile(ctx context.Context, movieID int64) error {
+	file, err := s.store.MediaFileForMovie(ctx, movieID)
+	if err != nil {
+		return err
+	}
+	if file == nil {
+		return nil
+	}
+	m, err := s.store.GetMovie(ctx, movieID)
+	if err != nil {
+		slog.Warn("media: load movie for file delete failed", "movieId", movieID, "err", err)
+	} else if m.RootFolderID != nil {
+		if root, err := s.store.GetRootFolder(ctx, *m.RootFolderID); err == nil {
+			abs := filepath.Join(root.Path, filepath.FromSlash(file.RelativePath))
+			if err := os.Remove(abs); err != nil && !os.IsNotExist(err) {
+				slog.Warn("media: delete movie file from disk failed", "movieId", movieID, "err", err)
+			}
+		}
+	}
+	if err := s.store.DeleteMediaFile(ctx, file.ID); err != nil {
 		return err
 	}
 	s.emitMovie(ctx, movieID)
