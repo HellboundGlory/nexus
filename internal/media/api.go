@@ -47,6 +47,7 @@ func (a *API) Mount(r chi.Router) {
 		r.Post("/", a.addMovie)
 		r.Get("/{id}", a.getMovie)
 		r.Delete("/{id}", a.deleteMovie)
+		r.Delete("/{id}/file", a.deleteMovieFile)
 		r.Post("/{id}/refresh", a.refreshMovie)
 		r.Put("/{id}/monitor", a.monitorMovie)
 		r.Put("/{id}/qualityprofile", a.assignMovieProfile)
@@ -535,6 +536,18 @@ func (a *API) deleteMovie(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := a.store.DeleteMovie(r.Context(), id); err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "internal", "failed to delete movie")
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (a *API) deleteMovieFile(w http.ResponseWriter, r *http.Request) {
+	id, ok := mediaID(w, r)
+	if !ok {
+		return
+	}
+	if err := a.svc.DeleteMovieFile(r.Context(), id); err != nil {
+		writeMediaError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})

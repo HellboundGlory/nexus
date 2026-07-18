@@ -423,3 +423,29 @@ func TestGetMovieOmitsFileWhenAbsent(t *testing.T) {
 		t.Fatalf("file key must be absent when no media file, got %s", w.Body.String())
 	}
 }
+
+func TestDeleteMovieFileRoute(t *testing.T) {
+	fp := &fakeProvider{movies: sampleMovies()}
+	r, st := newTestAPI(t, fp)
+	ctx := context.Background()
+	mid, err := st.CreateMovie(ctx, store.Movie{TMDBID: 200, Title: "Film"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.UpsertMediaFile(ctx, store.MediaFile{
+		MediaKind: "movie", MovieID: &mid, RelativePath: "a/b.mkv", Size: 1, QualityID: 9,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodDelete, "/movies/"+strconv.FormatInt(mid, 10)+"/file", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
+	}
+	f, _ := st.MediaFileForMovie(ctx, mid)
+	if f != nil {
+		t.Fatal("file row should be gone after DELETE")
+	}
+}

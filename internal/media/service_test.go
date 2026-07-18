@@ -3,6 +3,8 @@ package media
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/hellboundg/nexus/internal/core/database"
@@ -288,5 +290,87 @@ func TestSetSeriesMonitoredCascades(t *testing.T) {
 		if e.Monitored {
 			t.Fatal("series unmonitor should cascade to episodes")
 		}
+	}
+}
+
+func TestDeleteMovieFileRemovesRowAndDisk(t *testing.T) {
+	fp := &fakeProvider{movies: sampleMovies()}
+	svc, st := newTestService(t, fp)
+	ctx := context.Background()
+
+	root := t.TempDir()
+	rid, err := st.CreateRootFolder(ctx, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mid, err := st.CreateMovie(ctx, store.Movie{TMDBID: 200, Title: "Film", RootFolderID: &rid})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rel := "Film (2020)/Film.2020.1080p.mkv"
+	abs := filepath.Join(root, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(abs, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.UpsertMediaFile(ctx, store.MediaFile{
+		MediaKind: "movie", MovieID: &mid, RelativePath: rel, Size: 1, QualityID: 9,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := svc.DeleteMovieFile(ctx, mid); err != nil {
+		t.Fatalf("DeleteMovieFile: %v", err)
+	}
+	if _, err := os.Stat(abs); !os.IsNotExist(err) {
+		t.Fatalf("file should be gone, stat err = %v", err)
+	}
+	f, err := st.MediaFileForMovie(ctx, mid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f != nil {
+		t.Fatal("media file row should be deleted")
+	}
+}
+
+func TestDeleteMovieFileIdempotentWhenNoFile(t *testing.T) {
+	fp := &fakeProvider{movies: sampleMovies()}
+	svc, st := newTestService(t, fp)
+	ctx := context.Background()
+	mid, err := st.CreateMovie(ctx, store.Movie{TMDBID: 200, Title: "Film"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.DeleteMovieFile(ctx, mid); err != nil {
+		t.Fatalf("want nil for no-file, got %v", err)
+	}
+}
+
+func TestDeleteMovieFileRemovesRowWhenRootUnresolvable(t *testing.T) {
+	fp := &fakeProvider{movies: sampleMovies()}
+	svc, st := newTestService(t, fp)
+	ctx := context.Background()
+	// No RootFolderID set → disk step skipped, row still deleted.
+	mid, err := st.CreateMovie(ctx, store.Movie{TMDBID: 200, Title: "Film"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.UpsertMediaFile(ctx, store.MediaFile{
+		MediaKind: "movie", MovieID: &mid, RelativePath: "nowhere/x.mkv", Size: 1, QualityID: 9,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.DeleteMovieFile(ctx, mid); err != nil {
+		t.Fatalf("DeleteMovieFile: %v", err)
+	}
+	f, err := st.MediaFileForMovie(ctx, mid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f != nil {
+		t.Fatal("row should be deleted even when root unresolvable")
 	}
 }
