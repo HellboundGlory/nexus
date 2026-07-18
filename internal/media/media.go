@@ -440,5 +440,9 @@ func (s *Service) DeleteMovieFile(ctx context.Context, movieID int64) error {
 			}
 		}
 	}
-	return s.store.DeleteMediaFile(ctx, file.ID)
+	if err := s.store.DeleteMediaFile(ctx, file.ID); err != nil {
+		return err
+	}
+	s.emitMovie(ctx, movieID)
+	return nil
 }
