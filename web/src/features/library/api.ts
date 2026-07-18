@@ -101,8 +101,10 @@ export function useRefresh(invalidate: readonly unknown[]) {
 export function useDelete() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ kind, id }: { kind: "movie" | "series"; id: number }) =>
-      apiDelete<{ ok: boolean }>(`/${kind === "movie" ? "movies" : "series"}/${id}`),
+    mutationFn: ({ kind, id, deleteFiles }: { kind: "movie" | "series"; id: number; deleteFiles?: boolean }) =>
+      apiDelete<{ ok: boolean }>(
+        `/${kind === "movie" ? "movies" : "series"}/${id}${deleteFiles ? "?deleteFiles=true" : ""}`,
+      ),
     onSuccess: (_d, v) =>
       qc.invalidateQueries({ queryKey: v.kind === "movie" ? libraryKeys.movies : libraryKeys.series }),
   })
