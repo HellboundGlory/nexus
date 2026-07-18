@@ -26,6 +26,8 @@ func NewAPI(st *store.Store, svc *Service) *API { return &API{store: st, svc: sv
 func (a *API) Mount(r chi.Router) {
 	r.Get("/media/lookup", a.lookup)
 	r.Get("/calendar", a.calendar)
+	r.Get("/config/media-defaults", a.getMediaDefaults)
+	r.Put("/config/media-defaults", a.putMediaDefaults)
 
 	r.Route("/series", func(r chi.Router) {
 		r.Get("/", a.listSeries)
@@ -73,6 +75,8 @@ func writeMediaError(w http.ResponseWriter, err error) {
 	case errors.Is(err, ErrAlreadyExists):
 		api.WriteError(w, http.StatusConflict, "conflict", err.Error())
 	case errors.Is(err, ErrInvalidRootFolder):
+		api.WriteError(w, http.StatusBadRequest, "bad_request", err.Error())
+	case errors.Is(err, ErrInvalidQualityProfile):
 		api.WriteError(w, http.StatusBadRequest, "bad_request", err.Error())
 	case errors.Is(err, ErrProviderNotConfigured):
 		api.WriteError(w, http.StatusBadRequest, "not_configured", err.Error())
@@ -194,9 +198,10 @@ func (a *API) calendar(w http.ResponseWriter, r *http.Request) {
 }
 
 type addSeriesBody struct {
-	TMDBID        int    `json:"tmdbId"`
-	RootFolderID  *int64 `json:"rootFolderId"`
-	MonitorOption string `json:"monitorOption"`
+	TMDBID           int    `json:"tmdbId"`
+	RootFolderID     *int64 `json:"rootFolderId"`
+	MonitorOption    string `json:"monitorOption"`
+	QualityProfileID *int64 `json:"qualityProfileId"`
 }
 
 func (a *API) addSeries(w http.ResponseWriter, r *http.Request) {
@@ -212,7 +217,9 @@ func (a *API) addSeries(w http.ResponseWriter, r *http.Request) {
 	if b.MonitorOption == "" {
 		b.MonitorOption = MonitorAll
 	}
-	se, err := a.svc.AddSeries(r.Context(), AddSeriesRequest{TMDBID: b.TMDBID, RootFolderID: b.RootFolderID, MonitorOption: b.MonitorOption})
+	se, err := a.svc.AddSeries(r.Context(), AddSeriesRequest{
+		TMDBID: b.TMDBID, RootFolderID: b.RootFolderID, MonitorOption: b.MonitorOption, QualityProfileID: b.QualityProfileID,
+	})
 	if err != nil {
 		writeMediaError(w, err)
 		return
@@ -421,9 +428,10 @@ func (a *API) monitorEpisode(w http.ResponseWriter, r *http.Request) {
 }
 
 type addMovieBody struct {
-	TMDBID       int    `json:"tmdbId"`
-	RootFolderID *int64 `json:"rootFolderId"`
-	Monitored    bool   `json:"monitored"`
+	TMDBID           int    `json:"tmdbId"`
+	RootFolderID     *int64 `json:"rootFolderId"`
+	Monitored        bool   `json:"monitored"`
+	QualityProfileID *int64 `json:"qualityProfileId"`
 }
 
 func (a *API) addMovie(w http.ResponseWriter, r *http.Request) {
@@ -436,7 +444,9 @@ func (a *API) addMovie(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "bad_request", "tmdbId is required")
 		return
 	}
-	m, err := a.svc.AddMovie(r.Context(), AddMovieRequest{TMDBID: b.TMDBID, RootFolderID: b.RootFolderID, Monitored: b.Monitored})
+	m, err := a.svc.AddMovie(r.Context(), AddMovieRequest{
+		TMDBID: b.TMDBID, RootFolderID: b.RootFolderID, Monitored: b.Monitored, QualityProfileID: b.QualityProfileID,
+	})
 	if err != nil {
 		writeMediaError(w, err)
 		return
@@ -611,6 +621,28 @@ func (a *API) listRootFolders(w http.ResponseWriter, r *http.Request) {
 		rows = []store.RootFolder{}
 	}
 	api.WriteJSON(w, http.StatusOK, rows)
+}
+
+func (a *API) getMediaDefaults(w http.ResponseWriter, r *http.Request) {
+	d, err := a.svc.GetMediaDefaults(r.Context())
+	if err != nil {
+		api.WriteError(w, http.StatusInternalServerError, "internal", "failed to load media defaults")
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, d)
+}
+
+func (a *API) putMediaDefaults(w http.ResponseWriter, r *http.Request) {
+	var d MediaDefaults
+	if err := json.NewDecoder(r.Body).Decode(&d); err != nil {
+		api.WriteError(w, http.StatusBadRequest, "bad_request", "invalid JSON")
+		return
+	}
+	if err := a.svc.SetMediaDefaults(r.Context(), d); err != nil {
+		writeMediaError(w, err) // ErrInvalidRootFolder / ErrInvalidQualityProfile → 400
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, d)
 }
 
 func (a *API) deleteRootFolder(w http.ResponseWriter, r *http.Request) {

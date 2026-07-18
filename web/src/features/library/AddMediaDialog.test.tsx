@@ -5,6 +5,7 @@ import { ToastProvider } from "@/lib/toast"
 import { ApiError } from "@/lib/api"
 import { AddMediaDialog } from "@/features/library/AddMediaDialog"
 import * as lib from "@/features/library/api"
+import * as md from "@/features/settings/mediaDefaultsApi"
 
 vi.mock("@/features/library/api", async (orig) => {
   const actual = await orig<typeof import("@/features/library/api")>()
@@ -12,17 +13,25 @@ vi.mock("@/features/library/api", async (orig) => {
     ...actual,
     useLookup: vi.fn(),
     useRootFolders: vi.fn(),
+    useQualityProfiles: vi.fn(),
     useAddMovie: vi.fn(),
     useAddSeries: vi.fn(),
   }
 })
+vi.mock("@/features/settings/mediaDefaultsApi")
 
-beforeEach(() => vi.clearAllMocks())
+beforeEach(() => {
+  vi.clearAllMocks()
+  vi.mocked(lib.useQualityProfiles).mockReturnValue({ data: [] } as unknown as ReturnType<typeof lib.useQualityProfiles>)
+  vi.mocked(md.useMediaDefaults).mockReturnValue({ data: { movie: { rootFolderId: null, qualityProfileId: null }, tv: { rootFolderId: null, qualityProfileId: null } } } as unknown as ReturnType<typeof md.useMediaDefaults>)
+})
 
 function stub() {
   vi.mocked(lib.useLookup).mockReturnValue({ data: [{ tmdbId: 1, title: "Dune", year: 2021, overview: "", posterUrl: "", kind: "movie" }], isLoading: false } as unknown as ReturnType<typeof lib.useLookup>)
   vi.mocked(lib.useAddMovie).mockReturnValue({ mutateAsync: vi.fn(), isPending: false } as unknown as ReturnType<typeof lib.useAddMovie>)
   vi.mocked(lib.useAddSeries).mockReturnValue({ mutateAsync: vi.fn(), isPending: false } as unknown as ReturnType<typeof lib.useAddSeries>)
+  vi.mocked(lib.useQualityProfiles).mockReturnValue({ data: [{ id: 5, name: "HD-1080p", cutoffQualityId: 7, upgradeAllowed: true, items: [], createdAt: "" }] } as unknown as ReturnType<typeof lib.useQualityProfiles>)
+  vi.mocked(md.useMediaDefaults).mockReturnValue({ data: { movie: { rootFolderId: 1, qualityProfileId: 5 }, tv: { rootFolderId: null, qualityProfileId: null } } } as unknown as ReturnType<typeof md.useMediaDefaults>)
 }
 
 describe("AddMediaDialog", () => {
@@ -108,5 +117,92 @@ describe("AddMediaDialog", () => {
       expect.stringContaining("Newer Film"),
       expect.stringContaining("Older Film"),
     ])
+  })
+
+  it("pre-selects the default root folder and profile, and sends them on add", async () => {
+    stub()
+    const mutateAsync = vi.fn().mockResolvedValue({})
+    vi.mocked(lib.useAddMovie).mockReturnValue({ mutateAsync, isPending: false } as unknown as ReturnType<typeof lib.useAddMovie>)
+    vi.mocked(lib.useRootFolders).mockReturnValue({ data: [{ id: 1, path: "/media/movies", createdAt: "" }] } as unknown as ReturnType<typeof lib.useRootFolders>)
+    render(
+      <ToastProvider>
+        <AddMediaDialog kind="movie" open onOpenChange={() => {}} />
+      </ToastProvider>,
+    )
+    await userEvent.type(screen.getByPlaceholderText(/search/i), "dune")
+    await userEvent.click(await screen.findByText("Dune"))
+
+    // defaults are pre-selected; with both set, Add is enabled
+    expect((screen.getByLabelText("Root folder") as HTMLSelectElement).value).toBe("1")
+    expect((screen.getByLabelText("Quality profile") as HTMLSelectElement).value).toBe("5")
+    expect(screen.getByRole("button", { name: /add movie/i })).toBeEnabled()
+
+    await userEvent.click(screen.getByRole("button", { name: /add movie/i }))
+    expect(mutateAsync).toHaveBeenCalledWith({ tmdbId: 1, rootFolderId: 1, monitored: true, qualityProfileId: 5 })
+  })
+
+  it("requires a profile: Add is disabled until one is chosen when there is no default", async () => {
+    stub()
+    const mutateAsync = vi.fn().mockResolvedValue({})
+    vi.mocked(lib.useAddMovie).mockReturnValue({ mutateAsync, isPending: false } as unknown as ReturnType<typeof lib.useAddMovie>)
+    vi.mocked(lib.useRootFolders).mockReturnValue({ data: [{ id: 1, path: "/media/movies", createdAt: "" }] } as unknown as ReturnType<typeof lib.useRootFolders>)
+    // no default profile for movies
+    vi.mocked(md.useMediaDefaults).mockReturnValue({ data: { movie: { rootFolderId: 1, qualityProfileId: null }, tv: { rootFolderId: null, qualityProfileId: null } } } as unknown as ReturnType<typeof md.useMediaDefaults>)
+    render(
+      <ToastProvider>
+        <AddMediaDialog kind="movie" open onOpenChange={() => {}} />
+      </ToastProvider>,
+    )
+    await userEvent.type(screen.getByPlaceholderText(/search/i), "dune")
+    await userEvent.click(await screen.findByText("Dune"))
+
+    // no profile pre-selected → Add disabled
+    expect(screen.getByRole("button", { name: /add movie/i })).toBeDisabled()
+
+    await userEvent.selectOptions(screen.getByLabelText("Quality profile"), "5")
+    expect(screen.getByRole("button", { name: /add movie/i })).toBeEnabled()
+    await userEvent.click(screen.getByRole("button", { name: /add movie/i }))
+    expect(mutateAsync).toHaveBeenCalledWith({ tmdbId: 1, rootFolderId: 1, monitored: true, qualityProfileId: 5 })
+  })
+
+  it("requires a root folder: Add is disabled until one is chosen when there is no default", async () => {
+    stub()
+    const mutateAsync = vi.fn().mockResolvedValue({})
+    vi.mocked(lib.useAddMovie).mockReturnValue({ mutateAsync, isPending: false } as unknown as ReturnType<typeof lib.useAddMovie>)
+    vi.mocked(lib.useRootFolders).mockReturnValue({ data: [{ id: 1, path: "/media/movies", createdAt: "" }] } as unknown as ReturnType<typeof lib.useRootFolders>)
+    // profile default present (5), but no root-folder default
+    vi.mocked(md.useMediaDefaults).mockReturnValue({ data: { movie: { rootFolderId: null, qualityProfileId: 5 }, tv: { rootFolderId: null, qualityProfileId: null } } } as unknown as ReturnType<typeof md.useMediaDefaults>)
+    render(
+      <ToastProvider>
+        <AddMediaDialog kind="movie" open onOpenChange={() => {}} />
+      </ToastProvider>,
+    )
+    await userEvent.type(screen.getByPlaceholderText(/search/i), "dune")
+    await userEvent.click(await screen.findByText("Dune"))
+
+    // profile satisfied by the default, but no root folder → Add disabled
+    expect(screen.getByRole("button", { name: /add movie/i })).toBeDisabled()
+
+    await userEvent.selectOptions(screen.getByLabelText("Root folder"), "1")
+    expect(screen.getByRole("button", { name: /add movie/i })).toBeEnabled()
+    await userEvent.click(screen.getByRole("button", { name: /add movie/i }))
+    expect(mutateAsync).toHaveBeenCalledWith({ tmdbId: 1, rootFolderId: 1, monitored: true, qualityProfileId: 5 })
+  })
+
+  it("shows a hint and disables Add when no quality profiles are configured", async () => {
+    stub()
+    vi.mocked(lib.useRootFolders).mockReturnValue({ data: [{ id: 1, path: "/media/movies", createdAt: "" }] } as unknown as ReturnType<typeof lib.useRootFolders>)
+    vi.mocked(lib.useQualityProfiles).mockReturnValue({ data: [] } as unknown as ReturnType<typeof lib.useQualityProfiles>)
+    vi.mocked(md.useMediaDefaults).mockReturnValue({ data: { movie: { rootFolderId: 1, qualityProfileId: null }, tv: { rootFolderId: null, qualityProfileId: null } } } as unknown as ReturnType<typeof md.useMediaDefaults>)
+    render(
+      <ToastProvider>
+        <AddMediaDialog kind="movie" open onOpenChange={() => {}} />
+      </ToastProvider>,
+    )
+    await userEvent.type(screen.getByPlaceholderText(/search/i), "dune")
+    await userEvent.click(await screen.findByText("Dune"))
+
+    expect(screen.getByText(/no quality profile configured/i)).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /add movie/i })).toBeDisabled()
   })
 })

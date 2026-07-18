@@ -76,7 +76,7 @@ export type Episode = {
 
 export type SeriesDetail = Series & { seasons: Season[]; episodes: Episode[] }
 
-export type AddMovieBody = { tmdbId: number; rootFolderId: number | null; monitored: boolean }
-export type AddSeriesBody = { tmdbId: number; rootFolderId: number | null; monitorOption: "all" | "future" | "none" }
+export type AddMovieBody = { tmdbId: number; rootFolderId: number | null; monitored: boolean; qualityProfileId: number | null }
+export type AddSeriesBody = { tmdbId: number; rootFolderId: number | null; monitorOption: "all" | "future" | "none"; qualityProfileId: number | null }
 
 export type MediaKind = "movie" | "tv"
