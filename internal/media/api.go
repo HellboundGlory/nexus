@@ -534,7 +534,8 @@ func (a *API) deleteMovie(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := a.store.DeleteMovie(r.Context(), id); err != nil {
+	deleteFiles := r.URL.Query().Get("deleteFiles") == "true"
+	if err := a.svc.DeleteMovie(r.Context(), id, deleteFiles); err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "internal", "failed to delete movie")
 		return
 	}

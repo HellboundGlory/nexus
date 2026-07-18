@@ -449,3 +449,76 @@ func (s *Service) DeleteMovieFile(ctx context.Context, movieID int64) error {
 	s.emitMovie(ctx, movieID)
 	return nil
 }
+
+// itemFolderTarget returns the absolute folder to remove for a file's relative
+// path under rootPath, or "" if it cannot be safely derived. The result is
+// always a direct child of rootPath: an empty/"."/".." first segment or any
+// path that would escape the root returns "" (so RemoveAll can never hit the
+// root itself or climb out of it).
+func itemFolderTarget(rootPath, relPath string) string {
+	seg := strings.SplitN(filepath.ToSlash(relPath), "/", 2)[0]
+	if seg == "" || seg == "." || seg == ".." {
+		return ""
+	}
+	abs := filepath.Join(rootPath, seg)
+	rel, err := filepath.Rel(rootPath, abs)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return ""
+	}
+	return abs
+}
+
+// removeItemFolders best-effort deletes each distinct item folder derived from
+// the given files. Errors are logged, never fatal.
+func (s *Service) removeItemFolders(root store.RootFolder, files []store.MediaFile) {
+	seen := map[string]bool{}
+	for _, f := range files {
+		target := itemFolderTarget(root.Path, f.RelativePath)
+		if target == "" || seen[target] {
+			continue
+		}
+		seen[target] = true
+		if err := os.RemoveAll(target); err != nil {
+			slog.Warn("media: delete item folder from disk failed", "path", target, "err", err)
+		}
+	}
+}
+
+// diskTargetsForMovie gathers (root, files) for a movie's disk cleanup, or
+// (nil, nil) when deleteFiles is false, the movie has no file, or the root
+// can't be resolved. Best-effort; logs on a gather error.
+func (s *Service) diskTargetsForMovie(ctx context.Context, id int64, deleteFiles bool) (*store.RootFolder, []store.MediaFile) {
+	if !deleteFiles {
+		return nil, nil
+	}
+	file, err := s.store.MediaFileForMovie(ctx, id)
+	if err != nil {
+		slog.Warn("media: gather movie file for disk delete failed", "movieId", id, "err", err)
+		return nil, nil
+	}
+	if file == nil {
+		return nil, nil
+	}
+	m, err := s.store.GetMovie(ctx, id)
+	if err != nil || m.RootFolderID == nil {
+		return nil, nil
+	}
+	root, err := s.store.GetRootFolder(ctx, *m.RootFolderID)
+	if err != nil {
+		return nil, nil
+	}
+	return root, []store.MediaFile{*file}
+}
+
+// DeleteMovie removes a movie from the library. When deleteFiles is set, its
+// on-disk folder is also removed (best-effort, after the DB delete).
+func (s *Service) DeleteMovie(ctx context.Context, id int64, deleteFiles bool) error {
+	root, files := s.diskTargetsForMovie(ctx, id, deleteFiles)
+	if err := s.store.DeleteMovie(ctx, id); err != nil {
+		return err
+	}
+	if root != nil {
+		s.removeItemFolders(*root, files)
+	}
+	return nil
+}
