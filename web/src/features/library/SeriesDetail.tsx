@@ -10,6 +10,7 @@ import { StatusBadge, seriesBadge } from "./StatusBadge"
 import { SeasonTable } from "./SeasonTable"
 import { DetailBanner } from "./DetailBanner"
 import { InteractiveSearchDialog } from "@/features/search/InteractiveSearchDialog"
+import { DeleteConfirmDialog } from "./DeleteConfirmDialog"
 import { missingSeasonEpisodeIds } from "@/features/search/resolve"
 import type { SearchTarget } from "@/features/search/types"
 
@@ -25,6 +26,7 @@ export function SeriesDetail({ id }: { id: number }) {
   const search = useSearch()
   const [searchTarget, setSearchTarget] = useState<SearchTarget | null>(null)
   const [searchTitle, setSearchTitle] = useState("")
+  const [confirmDelete, setConfirmDelete] = useState(false)
 
   if (q.isLoading) return <div className="p-6 text-sm text-[var(--color-muted)]">Loading…</div>
   if (q.isError || !q.data) {
@@ -67,7 +69,7 @@ export function SeriesDetail({ id }: { id: number }) {
           </button>
           <button onClick={() => { refresh.mutate({ kind: "series", id }); toast("Refresh started") }} className="rounded-md border border-[var(--color-border)] px-3 py-1.5 text-sm">Refresh</button>
           <button
-            onClick={() => { if (confirm(`Delete ${s.title}?`)) del.mutate({ kind: "series", id }, { onSuccess: () => { toast("Deleted"); nav("/tv") } }) }}
+            onClick={() => setConfirmDelete(true)}
             className="rounded-md border border-[var(--color-warn)] px-3 py-1.5 text-sm text-[var(--color-warn)]"
           >
             Delete
@@ -118,6 +120,16 @@ export function SeriesDetail({ id }: { id: number }) {
         target={searchTarget}
         title={searchTitle}
         onOpenChange={(open) => { if (!open) setSearchTarget(null) }}
+      />
+
+      <DeleteConfirmDialog
+        open={confirmDelete}
+        onOpenChange={setConfirmDelete}
+        title={s.title}
+        onConfirm={(deleteFiles) => {
+          setConfirmDelete(false)
+          del.mutate({ kind: "series", id, deleteFiles }, { onSuccess: () => { toast("Deleted"); nav("/tv") } })
+        }}
       />
     </div>
   )

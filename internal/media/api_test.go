@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -447,5 +449,56 @@ func TestDeleteMovieFileRoute(t *testing.T) {
 	f, _ := st.MediaFileForMovie(ctx, mid)
 	if f != nil {
 		t.Fatal("file row should be gone after DELETE")
+	}
+}
+
+func TestDeleteMovieRouteParsesDeleteFiles(t *testing.T) {
+	fp := &fakeProvider{movies: sampleMovies()}
+	r, st := newTestAPI(t, fp)
+	ctx := context.Background()
+
+	root := t.TempDir()
+	rid, _ := st.CreateRootFolder(ctx, root)
+	mid, _ := st.CreateMovie(ctx, store.Movie{TMDBID: 200, Title: "Film", RootFolderID: &rid})
+	folder := filepath.Join(root, "Film (2020)")
+	os.MkdirAll(folder, 0o755)
+	os.WriteFile(filepath.Join(folder, "f.mkv"), []byte("x"), 0o644)
+	st.UpsertMediaFile(ctx, store.MediaFile{MediaKind: "movie", MovieID: &mid, RelativePath: "Film (2020)/f.mkv", Size: 1, QualityID: 9})
+
+	req := httptest.NewRequest(http.MethodDelete, "/movies/"+strconv.FormatInt(mid, 10)+"?deleteFiles=true", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
+	}
+	if _, err := os.Stat(folder); !os.IsNotExist(err) {
+		t.Fatalf("folder should be gone after deleteFiles=true, stat err = %v", err)
+	}
+}
+
+func TestDeleteSeriesRouteParsesDeleteFiles(t *testing.T) {
+	fp := &fakeProvider{series: sampleSeries()}
+	r, st := newTestAPI(t, fp)
+	ctx := context.Background()
+	root := t.TempDir()
+	rid, _ := st.CreateRootFolder(ctx, root)
+	// Seed a series with one episode file on disk.
+	sid, _ := st.CreateSeries(ctx, store.Series{TMDBID: 100, Title: "Show", RootFolderID: &rid})
+	st.UpsertSeason(ctx, store.Season{SeriesID: sid, SeasonNumber: 1, Monitored: true})
+	st.UpsertEpisode(ctx, store.Episode{SeriesID: sid, SeasonNumber: 1, EpisodeNumber: 1, Title: "E1"})
+	eps, _ := st.ListEpisodes(ctx, sid)
+	dir := filepath.Join(root, "Show", "Season 01")
+	os.MkdirAll(dir, 0o755)
+	os.WriteFile(filepath.Join(dir, "E01.mkv"), []byte("x"), 0o644)
+	st.UpsertMediaFile(ctx, store.MediaFile{MediaKind: "episode", EpisodeID: &eps[0].ID, RelativePath: "Show/Season 01/E01.mkv", Size: 1, QualityID: 9})
+
+	req := httptest.NewRequest(http.MethodDelete, "/series/"+strconv.FormatInt(sid, 10)+"?deleteFiles=true", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(root, "Show")); !os.IsNotExist(err) {
+		t.Fatalf("series folder should be gone, stat err = %v", err)
 	}
 }
