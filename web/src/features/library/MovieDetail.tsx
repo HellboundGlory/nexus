@@ -9,6 +9,7 @@ import { Select } from "@/components/ui/select"
 import { StatusBadge, movieBadge } from "./StatusBadge"
 import { DetailBanner } from "./DetailBanner"
 import { InteractiveSearchDialog } from "@/features/search/InteractiveSearchDialog"
+import { DeleteConfirmDialog } from "./DeleteConfirmDialog"
 import type { SearchTarget } from "@/features/search/types"
 import { formatSize } from "@/features/search/resolve"
 
@@ -24,6 +25,7 @@ export function MovieDetail({ id }: { id: number }) {
   const search = useSearch()
   const delFile = useDeleteMovieFile()
   const [searchTarget, setSearchTarget] = useState<SearchTarget | null>(null)
+  const [confirmDelete, setConfirmDelete] = useState(false)
 
   if (q.isLoading) return <div className="p-6 text-sm text-[var(--color-muted)]">Loading…</div>
   if (q.isError || !q.data) {
@@ -87,11 +89,7 @@ export function MovieDetail({ id }: { id: number }) {
             Refresh
           </button>
           <button
-            onClick={() => {
-              if (confirm(`Delete ${m.title}?`)) {
-                del.mutate({ kind: "movie", id }, { onSuccess: () => { toast("Deleted"); nav("/movies") } })
-              }
-            }}
+            onClick={() => setConfirmDelete(true)}
             className="rounded-md border border-[var(--color-warn)] px-3 py-1.5 text-sm text-[var(--color-warn)]"
           >
             Delete
@@ -139,6 +137,16 @@ export function MovieDetail({ id }: { id: number }) {
         target={searchTarget}
         title={m.title}
         onOpenChange={(open) => { if (!open) setSearchTarget(null) }}
+      />
+
+      <DeleteConfirmDialog
+        open={confirmDelete}
+        onOpenChange={setConfirmDelete}
+        title={m.title}
+        onConfirm={(deleteFiles) => {
+          setConfirmDelete(false)
+          del.mutate({ kind: "movie", id, deleteFiles }, { onSuccess: () => { toast("Deleted"); nav("/movies") } })
+        }}
       />
     </div>
   )

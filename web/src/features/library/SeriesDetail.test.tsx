@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { MemoryRouter } from "react-router-dom"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
@@ -91,5 +91,39 @@ describe("SeriesDetail", () => {
     await userEvent.click(screen.getByRole("button", { name: /^search$/i }))
     expect(search).not.toHaveBeenCalled()
     expect(await screen.findByText(/assign a quality profile/i)).toBeInTheDocument()
+  })
+
+  it("opens the delete dialog and deletes with the chosen disk option", async () => {
+    const del = vi.fn()
+    vi.mocked(lib.useSeriesDetail).mockReturnValue({
+      data: {
+        id: 3, title: "The Bear", firstAired: "2022-06-23", overview: "", monitored: true,
+        qualityProfileId: 1, posterUrl: "", fanartUrl: "", episodeCount: 0, episodeFileCount: 0,
+        seasons: [], episodes: [],
+      },
+      isLoading: false, isError: false, refetch: vi.fn(),
+    } as unknown as ReturnType<typeof lib.useSeriesDetail>)
+    vi.mocked(lib.useQualityProfiles).mockReturnValue({ data: [] } as unknown as ReturnType<typeof lib.useQualityProfiles>)
+    vi.mocked(lib.useSetMonitored).mockReturnValue(mut())
+    vi.mocked(lib.useAssignProfile).mockReturnValue(mut())
+    vi.mocked(lib.useRefresh).mockReturnValue(mut())
+    vi.mocked(lib.useDelete).mockReturnValue(mut({ mutate: del }))
+    vi.mocked(lib.useSearch).mockReturnValue(mut())
+
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter>
+          <ToastProvider>
+            <SeriesDetail id={3} />
+          </ToastProvider>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+    await userEvent.click(screen.getByRole("button", { name: /^delete$/i })) // page button opens dialog
+    const dialog = screen.getByRole("dialog")
+    await userEvent.click(within(dialog).getByRole("checkbox"))
+    await userEvent.click(within(dialog).getByRole("button", { name: /^delete$/i }))
+    expect(del).toHaveBeenCalledWith(expect.objectContaining({ kind: "series", id: 3, deleteFiles: true }), expect.anything())
   })
 })
