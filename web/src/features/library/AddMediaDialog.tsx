@@ -4,8 +4,9 @@ import { Select } from "@/components/ui/select"
 import { ApiError } from "@/lib/api"
 import { useToast } from "@/lib/toast"
 import {
-  useLookup, useRootFolders, useAddMovie, useAddSeries,
+  useLookup, useRootFolders, useQualityProfiles, useAddMovie, useAddSeries,
 } from "./api"
+import { useMediaDefaults } from "@/features/settings/mediaDefaultsApi"
 import type { MetadataResult, MediaKind } from "./types"
 import { sortResults, type AddSort } from "./addSort"
 
@@ -21,6 +22,7 @@ export function AddMediaDialog({
   const [debounced, setDebounced] = useState("")
   const [picked, setPicked] = useState<MetadataResult | null>(null)
   const [rootFolderId, setRootFolderId] = useState("")
+  const [qualityProfileId, setQualityProfileId] = useState("")
   const [monitorOption, setMonitorOption] = useState<"all" | "future" | "none">("all")
   const [monitored, setMonitored] = useState(true)
   const [sort, setSort] = useState<AddSort>("relevance")
@@ -30,20 +32,34 @@ export function AddMediaDialog({
 
   const lookup = useLookup(debounced, kind)
   const rootFolders = useRootFolders()
+  const qualityProfiles = useQualityProfiles()
+  const mediaDefaults = useMediaDefaults()
   const addMovie = useAddMovie()
   const addSeries = useAddSeries()
 
   const noRoots = (rootFolders.data ?? []).length === 0
+  const noProfiles = (qualityProfiles.data ?? []).length === 0
   const pending = addMovie.isPending || addSeries.isPending
+
+  // Seed root folder + profile from the per-kind defaults each time a result is
+  // picked. react-query hands back a stable data reference once loaded, so this
+  // does not clobber a later manual override.
+  useEffect(() => {
+    if (!picked) return
+    const d = kind === "movie" ? mediaDefaults.data?.movie : mediaDefaults.data?.tv
+    setRootFolderId(d?.rootFolderId != null ? String(d.rootFolderId) : "")
+    setQualityProfileId(d?.qualityProfileId != null ? String(d.qualityProfileId) : "")
+  }, [picked, mediaDefaults.data, kind])
 
   async function submit() {
     if (!picked) return
-    const rfId = rootFolderId ? Number(rootFolderId) : null
+    const rfId = Number(rootFolderId) // gated non-empty by the Add button
+    const qpId = Number(qualityProfileId) // gated non-empty by the Add button
     try {
       if (kind === "movie") {
-        await addMovie.mutateAsync({ tmdbId: picked.tmdbId, rootFolderId: rfId, monitored })
+        await addMovie.mutateAsync({ tmdbId: picked.tmdbId, rootFolderId: rfId, monitored, qualityProfileId: qpId })
       } else {
-        await addSeries.mutateAsync({ tmdbId: picked.tmdbId, rootFolderId: rfId, monitorOption })
+        await addSeries.mutateAsync({ tmdbId: picked.tmdbId, rootFolderId: rfId, monitorOption, qualityProfileId: qpId })
       }
       toast(`Added ${picked.title}`, { variant: "ok" })
       reset()
@@ -54,7 +70,7 @@ export function AddMediaDialog({
   }
 
   function reset() {
-    setTerm(""); setDebounced(""); setPicked(null); setRootFolderId("")
+    setTerm(""); setDebounced(""); setPicked(null); setRootFolderId(""); setQualityProfileId("")
     setMonitorOption("all"); setMonitored(true); setSort("relevance")
   }
 
@@ -129,9 +145,21 @@ export function AddMediaDialog({
             <p className="text-sm text-[var(--color-warn)]">No root folder configured — add one in Settings.</p>
           ) : (
             <Select aria-label="Root folder" value={rootFolderId} onChange={setRootFolderId}>
-              <option value="">Select…</option>
+              {!rootFolderId && <option value="" disabled>Select a folder…</option>}
               {(rootFolders.data ?? []).map((rf) => (
                 <option key={rf.id} value={rf.id}>{rf.path}</option>
+              ))}
+            </Select>
+          )}
+
+          <label className="text-xs text-[var(--color-muted)]">Quality profile</label>
+          {noProfiles ? (
+            <p className="text-sm text-[var(--color-warn)]">No quality profile configured — add one in Settings.</p>
+          ) : (
+            <Select aria-label="Quality profile" value={qualityProfileId} onChange={setQualityProfileId}>
+              {!qualityProfileId && <option value="" disabled>Select a profile…</option>}
+              {(qualityProfiles.data ?? []).map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
               ))}
             </Select>
           )}
@@ -156,7 +184,7 @@ export function AddMediaDialog({
             <button onClick={() => setPicked(null)} className="rounded-md border border-[var(--color-border)] px-3 py-1.5 text-sm">Back</button>
             <button
               onClick={submit}
-              disabled={noRoots || pending}
+              disabled={noRoots || noProfiles || pending || !rootFolderId || !qualityProfileId}
               className="rounded-md bg-[var(--color-brand)] px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50"
             >
               {pending ? "Adding…" : `Add ${kind === "movie" ? "Movie" : "Show"}`}
