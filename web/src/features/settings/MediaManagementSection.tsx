@@ -27,8 +27,8 @@ export function MediaManagementSection() {
     setInitialized(true)
   }
 
-  if (defaults.isLoading || !form) return <div className="p-6"><p className="text-sm text-[var(--color-muted)]">Loading…</p></div>
   if (defaults.isError) return <div className="p-6"><p className="text-sm text-[var(--color-warn)]">Failed to load.</p></div>
+  if (defaults.isLoading || !form) return <div className="p-6"><p className="text-sm text-[var(--color-muted)]">Loading…</p></div>
 
   const rootOptions = roots.data ?? []
   const profileOptions = profiles.data ?? []

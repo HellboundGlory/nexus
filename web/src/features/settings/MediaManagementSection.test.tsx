@@ -55,4 +55,13 @@ describe("MediaManagementSection", () => {
       expect.anything(),
     )
   })
+
+  it("shows an error state (not a stuck spinner) when the defaults fail to load", () => {
+    vi.mocked(mdApi.useMediaDefaults).mockReturnValue({
+      data: undefined, isLoading: false, isError: true,
+    } as never)
+    renderSection()
+    expect(screen.getByText(/failed to load/i)).toBeInTheDocument()
+    expect(screen.queryByText(/loading…/i)).not.toBeInTheDocument()
+  })
 })
