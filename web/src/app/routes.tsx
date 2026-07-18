@@ -13,6 +13,7 @@ import { ConnectionsSection } from "@/features/settings/ConnectionsSection"
 import { QualityProfilesSection } from "@/features/settings/QualityProfilesSection"
 import { RootFoldersSection } from "@/features/settings/RootFoldersSection"
 import { NamingSection } from "@/features/settings/NamingSection"
+import { MediaManagementSection } from "@/features/settings/MediaManagementSection"
 import { GeneralSection } from "@/features/settings/GeneralSection"
 import { ActivityLayout } from "@/features/activity/ActivityLayout"
 import { QueueSection } from "@/features/activity/QueueSection"
@@ -56,6 +57,7 @@ export const router = createBrowserRouter([
           { path: "qualityprofiles", element: <QualityProfilesSection /> },
           { path: "rootfolders", element: <RootFoldersSection /> },
           { path: "naming", element: <NamingSection /> },
+          { path: "mediamanagement", element: <MediaManagementSection /> },
           { path: "general", element: <GeneralSection /> },
         ],
       },

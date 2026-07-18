@@ -7,6 +7,7 @@ const TABS: { to: string; label: string }[] = [
   { to: "/settings/qualityprofiles", label: "Quality Profiles" },
   { to: "/settings/rootfolders", label: "Root Folders" },
   { to: "/settings/naming", label: "Naming" },
+  { to: "/settings/mediamanagement", label: "Media Management" },
   { to: "/settings/general", label: "General" },
 ]
 
