@@ -432,7 +432,10 @@ func (s *Service) DeleteMovieFile(ctx context.Context, movieID int64) error {
 	if file == nil {
 		return nil
 	}
-	if m, err := s.store.GetMovie(ctx, movieID); err == nil && m.RootFolderID != nil {
+	m, err := s.store.GetMovie(ctx, movieID)
+	if err != nil {
+		slog.Warn("media: load movie for file delete failed", "movieId", movieID, "err", err)
+	} else if m.RootFolderID != nil {
 		if root, err := s.store.GetRootFolder(ctx, *m.RootFolderID); err == nil {
 			abs := filepath.Join(root.Path, filepath.FromSlash(file.RelativePath))
 			if err := os.Remove(abs); err != nil && !os.IsNotExist(err) {
