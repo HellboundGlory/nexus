@@ -234,6 +234,28 @@ func TestMediaFilesForSeries(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Second series with its own season/episode/file, to prove
+	// MediaFilesForSeries scopes by series_id rather than returning all files.
+	sid2, err := st.CreateSeries(ctx, Series{TMDBID: 2, Title: "Other Show"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertSeason(ctx, Season{SeriesID: sid2, SeasonNumber: 1, Monitored: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertEpisode(ctx, Episode{SeriesID: sid2, SeasonNumber: 1, EpisodeNumber: 1, Title: "E1"}); err != nil {
+		t.Fatal(err)
+	}
+	eps2, _ := st.ListEpisodes(ctx, sid2)
+	if len(eps2) == 0 {
+		t.Fatal("no episodes for second series")
+	}
+	if _, err := st.UpsertMediaFile(ctx, MediaFile{
+		MediaKind: "episode", EpisodeID: &eps2[0].ID, RelativePath: "Other Show/Season 01/E01.mkv", Size: 1, QualityID: 9,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
 	files, err := st.MediaFilesForSeries(ctx, sid)
 	if err != nil {
 		t.Fatal(err)

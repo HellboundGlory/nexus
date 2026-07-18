@@ -500,11 +500,16 @@ func (s *Service) diskTargetsForMovie(ctx context.Context, id int64, deleteFiles
 		return nil, nil
 	}
 	m, err := s.store.GetMovie(ctx, id)
-	if err != nil || m.RootFolderID == nil {
+	if err != nil {
+		slog.Warn("media: load movie for disk delete failed", "movieId", id, "err", err)
+		return nil, nil
+	}
+	if m.RootFolderID == nil {
 		return nil, nil
 	}
 	root, err := s.store.GetRootFolder(ctx, *m.RootFolderID)
 	if err != nil {
+		slog.Warn("media: resolve root for disk delete failed", "movieId", id, "err", err)
 		return nil, nil
 	}
 	return root, []store.MediaFile{*file}
@@ -538,11 +543,16 @@ func (s *Service) diskTargetsForSeries(ctx context.Context, id int64, deleteFile
 		return nil, nil
 	}
 	se, err := s.store.GetSeries(ctx, id)
-	if err != nil || se.RootFolderID == nil {
+	if err != nil {
+		slog.Warn("media: load series for disk delete failed", "seriesId", id, "err", err)
+		return nil, nil
+	}
+	if se.RootFolderID == nil {
 		return nil, nil
 	}
 	root, err := s.store.GetRootFolder(ctx, *se.RootFolderID)
 	if err != nil {
+		slog.Warn("media: resolve root for disk delete failed", "seriesId", id, "err", err)
 		return nil, nil
 	}
 	return root, files
