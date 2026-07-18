@@ -522,3 +522,41 @@ func (s *Service) DeleteMovie(ctx context.Context, id int64, deleteFiles bool) e
 	}
 	return nil
 }
+
+// diskTargetsForSeries gathers (root, files) for a series' disk cleanup, or
+// (nil, nil) when deleteFiles is false or the root can't be resolved.
+func (s *Service) diskTargetsForSeries(ctx context.Context, id int64, deleteFiles bool) (*store.RootFolder, []store.MediaFile) {
+	if !deleteFiles {
+		return nil, nil
+	}
+	files, err := s.store.MediaFilesForSeries(ctx, id)
+	if err != nil {
+		slog.Warn("media: gather series files for disk delete failed", "seriesId", id, "err", err)
+		return nil, nil
+	}
+	if len(files) == 0 {
+		return nil, nil
+	}
+	se, err := s.store.GetSeries(ctx, id)
+	if err != nil || se.RootFolderID == nil {
+		return nil, nil
+	}
+	root, err := s.store.GetRootFolder(ctx, *se.RootFolderID)
+	if err != nil {
+		return nil, nil
+	}
+	return root, files
+}
+
+// DeleteSeries removes a series from the library. When deleteFiles is set, its
+// on-disk folder is also removed (best-effort, after the DB delete).
+func (s *Service) DeleteSeries(ctx context.Context, id int64, deleteFiles bool) error {
+	root, files := s.diskTargetsForSeries(ctx, id, deleteFiles)
+	if err := s.store.DeleteSeries(ctx, id); err != nil {
+		return err
+	}
+	if root != nil {
+		s.removeItemFolders(*root, files)
+	}
+	return nil
+}

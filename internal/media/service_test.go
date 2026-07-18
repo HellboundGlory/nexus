@@ -479,3 +479,43 @@ func TestDeleteMovieContainmentGuardRejectsEscape(t *testing.T) {
 		t.Fatalf("root itself must survive: %v", err)
 	}
 }
+
+func TestDeleteSeriesWithDiskRemovesFolderAndRows(t *testing.T) {
+	fp := &fakeProvider{series: sampleSeries()}
+	svc, st := newTestService(t, fp)
+	ctx := context.Background()
+
+	root := t.TempDir()
+	rid, err := st.CreateRootFolder(ctx, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	se, err := svc.AddSeries(ctx, AddSeriesRequest{TMDBID: 100, RootFolderID: &rid, MonitorOption: MonitorAll})
+	if err != nil {
+		t.Fatal(err)
+	}
+	eps, _ := st.ListEpisodes(ctx, se.ID)
+	if len(eps) == 0 {
+		t.Fatal("no episodes")
+	}
+	seasonDir := filepath.Join(root, "Show", "Season 01")
+	if err := os.MkdirAll(seasonDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(seasonDir, "E01.mkv"), []byte("x"), 0o644)
+	if _, err := st.UpsertMediaFile(ctx, store.MediaFile{
+		MediaKind: "episode", EpisodeID: &eps[0].ID, RelativePath: "Show/Season 01/E01.mkv", Size: 1, QualityID: 9,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := svc.DeleteSeries(ctx, se.ID, true); err != nil {
+		t.Fatalf("DeleteSeries: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "Show")); !os.IsNotExist(err) {
+		t.Fatalf("series folder should be gone, stat err = %v", err)
+	}
+	if _, err := st.GetSeries(ctx, se.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("series should be deleted, got %v", err)
+	}
+}

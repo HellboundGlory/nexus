@@ -322,7 +322,8 @@ func (a *API) deleteSeries(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := a.store.DeleteSeries(r.Context(), id); err != nil {
+	deleteFiles := r.URL.Query().Get("deleteFiles") == "true"
+	if err := a.svc.DeleteSeries(r.Context(), id, deleteFiles); err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "internal", "failed to delete series")
 		return
 	}

@@ -209,3 +209,36 @@ func TestGrabbedSince(t *testing.T) {
 		t.Fatalf("future since should return no rows, got %d", len(future))
 	}
 }
+
+func TestMediaFilesForSeries(t *testing.T) {
+	st := newImportTestStore(t) // existing helper at import_store_test.go:12 (Open+Migrate+New)
+	ctx := context.Background()
+
+	sid, err := st.CreateSeries(ctx, Series{TMDBID: 1, Title: "Show"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertSeason(ctx, Season{SeriesID: sid, SeasonNumber: 1, Monitored: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertEpisode(ctx, Episode{SeriesID: sid, SeasonNumber: 1, EpisodeNumber: 1, Title: "E1"}); err != nil {
+		t.Fatal(err)
+	}
+	eps, _ := st.ListEpisodes(ctx, sid)
+	if len(eps) == 0 {
+		t.Fatal("no episodes")
+	}
+	if _, err := st.UpsertMediaFile(ctx, MediaFile{
+		MediaKind: "episode", EpisodeID: &eps[0].ID, RelativePath: "Show/Season 01/E01.mkv", Size: 1, QualityID: 9,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	files, err := st.MediaFilesForSeries(ctx, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 || files[0].RelativePath != "Show/Season 01/E01.mkv" {
+		t.Fatalf("want 1 series file, got %+v", files)
+	}
+}

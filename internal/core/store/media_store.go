@@ -191,6 +191,27 @@ func (s *Store) DeleteSeries(ctx context.Context, id int64) error {
 	return err
 }
 
+// MediaFilesForSeries returns every media file belonging to a series' episodes.
+func (s *Store) MediaFilesForSeries(ctx context.Context, seriesID int64) ([]MediaFile, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT mf.id, mf.media_kind, mf.episode_id, mf.movie_id, mf.relative_path, mf.size, mf.quality_id, mf.added_at
+		 FROM media_files mf JOIN episodes e ON mf.episode_id = e.id
+		 WHERE e.series_id = ?`, seriesID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []MediaFile
+	for rows.Next() {
+		f, err := scanMediaFile(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) SetSeriesMonitored(ctx context.Context, id int64, monitored bool) error {
 	res, err := s.db.ExecContext(ctx, `UPDATE series SET monitored=? WHERE id=?`, boolToInt(monitored), id)
 	if err != nil {
