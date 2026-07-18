@@ -14,7 +14,7 @@
 - Wire rule (load-bearing): optional objects/ids serialise as **absent** (omitempty) when unset, never as `0` or an empty object. Test key absence via `map[string]json.RawMessage`, not a typed round-trip.
 - `web/dist` is committed and CI drift-checks it — the final frontend task must rebuild it.
 - Follow existing patterns exactly: chi routes in `API.Mount`, service methods on `media.Service` (holds `store`, `meta`, `bus` — **no logger**), FE hooks in `library/api.ts`, component tests via `vi.mock("@/features/library/api")`.
-- Best-effort file removal matches the importer precedent `_ = os.Remove(...)` (`internal/importing/importer.go:175`): errors are swallowed, never fatal. (Spec §3.2 says "logged"; the `Service` has no logger and the codebase's own best-effort removal discards, so we match precedent — call this out at review if a logged variant is wanted.)
+- Best-effort file removal is never fatal, but **real errors are logged via `slog.Warn`** — the dominant codebase convention (automation/importing/downloadclient all call package-level `slog.Warn("<pkg>: <msg>", "key", val, "err", err)`; nothing is threaded through `Service`). A benign already-gone file (`os.IsNotExist`) counts as success and is **not** logged. This honors spec §3.2 ("logged, never fatal").
 
 ---
 
@@ -178,7 +178,7 @@ git commit -m "feat(media): expose imported file on GET /movies/{id}"
 ### Task 2: Backend — `DeleteMovieFile` service + `DELETE /movies/{id}/file`
 
 **Files:**
-- Modify: `internal/media/media.go` (add `DeleteMovieFile`; add `os`, `path/filepath` imports)
+- Modify: `internal/media/media.go` (add `DeleteMovieFile`; add `log/slog`, `os`, `path/filepath` imports)
 - Modify: `internal/media/api.go` (add route in the `/movies` block at :44; add `deleteMovieFile` handler)
 - Test: `internal/media/service_test.go` (service behaviour), `internal/media/api_test.go` (route)
 
@@ -311,12 +311,13 @@ Expected: FAIL — `svc.DeleteMovieFile` undefined / route 404 or 405.
 
 - [ ] **Step 3: Write minimal implementation**
 
-In `internal/media/media.go`, add `"os"` and `"path/filepath"` to imports, then add:
+In `internal/media/media.go`, add `"log/slog"`, `"os"`, and `"path/filepath"` to imports, then add:
 
 ```go
 // DeleteMovieFile removes a movie's imported file: best-effort disk removal
-// (errors ignored, matching the importer) then the DB row is always deleted,
-// flipping the movie back to missing. No-op (nil) when the movie has no file.
+// (real errors logged, never fatal; already-gone counts as success) then the
+// DB row is always deleted, flipping the movie back to missing. No-op (nil)
+// when the movie has no file.
 func (s *Service) DeleteMovieFile(ctx context.Context, movieID int64) error {
 	file, err := s.store.MediaFileForMovie(ctx, movieID)
 	if err != nil {
@@ -327,7 +328,10 @@ func (s *Service) DeleteMovieFile(ctx context.Context, movieID int64) error {
 	}
 	if m, err := s.store.GetMovie(ctx, movieID); err == nil && m.RootFolderID != nil {
 		if root, err := s.store.GetRootFolder(ctx, *m.RootFolderID); err == nil {
-			_ = os.Remove(filepath.Join(root.Path, filepath.FromSlash(file.RelativePath)))
+			abs := filepath.Join(root.Path, filepath.FromSlash(file.RelativePath))
+			if err := os.Remove(abs); err != nil && !os.IsNotExist(err) {
+				slog.Warn("media: delete movie file from disk failed", "movieId", movieID, "err", err)
+			}
 		}
 	}
 	return s.store.DeleteMediaFile(ctx, file.ID)
@@ -557,6 +561,6 @@ git commit -m "feat(webui): back-button hover/focus states + rebuild dist"
 - §4.4 back-button hover/focus on both pages incl. not-found fallbacks → Task 4. ✓
 - §5 tests: getMovie present+resolved / absent-via-RawMessage (T1); DeleteMovieFile row+disk / idempotent / root-unresolvable (T2); FE box present/absent + delete-invalidates (T3); dist rebuild (T4); #6 untested (T4). ✓
 
-**Placeholder scan:** No TBDs; every code step carries full code and exact commands. The only judgement call is deliberately flagged (best-effort discard vs. logged, Global Constraints).
+**Placeholder scan:** No TBDs; every code step carries full code and exact commands. Best-effort disk removal logs real errors via `slog.Warn` per spec §3.2 (Global Constraints), skipping benign already-gone files.
 
 **Type consistency:** `movieFileDTO` fields (`relativePath/size/qualityId/quality/addedAt`) match the FE `Movie.file` shape and the Task-1 test's inline struct. `DeleteMovieFile(ctx, movieID int64) error` is used identically in the handler (T2) and service tests. `useDeleteMovieFile()` mutate signature `(id: number)` matches the component call `delFile.mutate(id, …)` and the test `del` assertion. `quality.DefinitionByID` name field (`.Name`) used consistently.
