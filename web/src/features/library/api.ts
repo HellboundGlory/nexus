@@ -108,6 +108,14 @@ export function useDelete() {
   })
 }
 
+export function useDeleteMovieFile() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: number) => apiDelete<{ ok: boolean }>(`/movies/${id}/file`),
+    onSuccess: (_d, id) => qc.invalidateQueries({ queryKey: libraryKeys.movie(id) }),
+  })
+}
+
 // Fire-and-forget search. 202 Accepted; results arrive later via the Activity feed.
 export function useSearch() {
   return useMutation({

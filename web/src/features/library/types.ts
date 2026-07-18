@@ -38,6 +38,13 @@ export type Movie = {
   addedAt: string
   lastRefreshedAt: string | null
   hasFile: boolean
+  file?: {
+    relativePath: string
+    size: number
+    qualityId: number
+    quality: string
+    addedAt: string
+  } | null
 }
 
 export type Series = {
