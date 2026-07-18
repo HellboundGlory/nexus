@@ -26,6 +26,8 @@ func NewAPI(st *store.Store, svc *Service) *API { return &API{store: st, svc: sv
 func (a *API) Mount(r chi.Router) {
 	r.Get("/media/lookup", a.lookup)
 	r.Get("/calendar", a.calendar)
+	r.Get("/config/media-defaults", a.getMediaDefaults)
+	r.Put("/config/media-defaults", a.putMediaDefaults)
 
 	r.Route("/series", func(r chi.Router) {
 		r.Get("/", a.listSeries)
@@ -619,6 +621,28 @@ func (a *API) listRootFolders(w http.ResponseWriter, r *http.Request) {
 		rows = []store.RootFolder{}
 	}
 	api.WriteJSON(w, http.StatusOK, rows)
+}
+
+func (a *API) getMediaDefaults(w http.ResponseWriter, r *http.Request) {
+	d, err := a.svc.GetMediaDefaults(r.Context())
+	if err != nil {
+		api.WriteError(w, http.StatusInternalServerError, "internal", "failed to load media defaults")
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, d)
+}
+
+func (a *API) putMediaDefaults(w http.ResponseWriter, r *http.Request) {
+	var d MediaDefaults
+	if err := json.NewDecoder(r.Body).Decode(&d); err != nil {
+		api.WriteError(w, http.StatusBadRequest, "bad_request", "invalid JSON")
+		return
+	}
+	if err := a.svc.SetMediaDefaults(r.Context(), d); err != nil {
+		writeMediaError(w, err) // ErrInvalidRootFolder / ErrInvalidQualityProfile → 400
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, d)
 }
 
 func (a *API) deleteRootFolder(w http.ResponseWriter, r *http.Request) {
