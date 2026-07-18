@@ -30,7 +30,7 @@ export function MovieDetail({ id }: { id: number }) {
     return (
       <div className="p-6">
         <p className="text-sm text-[var(--color-muted)]">Not found.</p>
-        <button onClick={() => nav("/movies")} className="mt-3 text-sm text-[var(--color-brand)]">← Back to Movies</button>
+        <button onClick={() => nav("/movies")} className="mt-3 text-sm text-[var(--color-brand)] rounded hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)]">← Back to Movies</button>
       </div>
     )
   }
@@ -43,7 +43,7 @@ export function MovieDetail({ id }: { id: number }) {
         fanartUrl={m.fanartUrl}
         posterUrl={m.posterUrl}
         title={m.title}
-        back={<button onClick={() => nav("/movies")} className="text-sm text-[var(--color-brand)]">← Movies</button>}
+        back={<button onClick={() => nav("/movies")} className="text-sm text-[var(--color-brand)] rounded hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)]">← Movies</button>}
       >
         <div className="flex items-center gap-3">
           <h2 className="text-2xl font-bold">{m.title}</h2>
