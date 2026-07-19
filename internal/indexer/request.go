@@ -13,12 +13,31 @@ import (
 	"github.com/hellboundg/nexus/internal/core/provider"
 )
 
-// foldTerm strips diacritics from a search term (é→e), mirroring the arr apps'
-// RemoveAccent. Newznab indexers match q literally against scene release names,
-// which are ASCII, so an accented term finds nothing. Decomposable marks only —
+// titleSpecials removes the punctuation that metadata titles carry but ASCII
+// scene release names never do, mirroring the arr apps' SearchCriteriaBase
+// SpecialCharacter set (['.`´‘’]). Each is deleted, NOT replaced with a space,
+// so "Marvel's Daredevil" collapses to "MarvelsDaredevil"-style tokens exactly
+// as scene names spell them ("Marvels.Daredevil...").
+var titleSpecials = strings.NewReplacer(
+	"'", "", // U+0027 apostrophe
+	"’", "", // ’ right single quotation mark (TMDb frequently uses this)
+	"‘", "", // ‘ left single quotation mark
+	"`", "", // ` grave accent
+	"´", "", // ´ acute accent
+	".", "", // period — mirrors the arr set (S.W.A.T. → SWAT)
+)
+
+// cleanTerm normalizes a search term for Newznab/Torznab q matching, mirroring
+// the arr apps' GetCleanSceneTitle: it first deletes apostrophes and related
+// punctuation (titleSpecials), then folds diacritics (é→e). Newznab indexers
+// match q LITERALLY against ASCII scene names, so both an apostrophe
+// ("Marvel's Daredevil") and an accent ("Pokémon") otherwise return nothing —
+// verified against NZBGeek: q with the apostrophe returned 0 items where the
+// stripped spelling returned 43. Accent folding is decomposable marks only —
 // non-decomposable letters (ø, ß, œ) and non-Latin scripts pass through
 // unchanged rather than being mangled.
-func foldTerm(s string) string {
+func cleanTerm(s string) string {
+	s = titleSpecials.Replace(s)
 	out, _, err := transform.String(
 		transform.Chain(norm.NFD, runes.Remove(runes.In(unicode.Mn)), norm.NFC), s)
 	if err != nil {
@@ -43,7 +62,7 @@ func buildSearchURL(base, apiKey string, q provider.Query) (string, error) {
 		v.Set("apikey", apiKey)
 	}
 	if q.Term != "" {
-		v.Set("q", foldTerm(q.Term))
+		v.Set("q", cleanTerm(q.Term))
 	}
 	if len(q.Categories) > 0 {
 		cats := make([]string, len(q.Categories))
