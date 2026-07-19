@@ -162,7 +162,7 @@ func scanTask(sc interface{ Scan(...any) error }) (Task, error) {
 func (s *Store) LastTaskByName(ctx context.Context, name string) (*Task, error) {
 	t, err := scanTask(s.db.QueryRowContext(ctx,
 		`SELECT id, name, status, progress, message, created_at, updated_at, started_at, ended_at
-		 FROM tasks WHERE name = ? ORDER BY created_at DESC LIMIT 1`, name))
+		 FROM tasks WHERE name = ? ORDER BY created_at DESC, rowid DESC LIMIT 1`, name))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}

@@ -1,11 +1,13 @@
 package api
 
 import (
+	"errors"
 	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/hellboundg/nexus/internal/core/scheduler"
 )
 
 type statusResponse struct {
@@ -113,7 +115,12 @@ func (s *server) handleRunTask(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
 	id, err := s.deps.Tasks.RunNow(name)
 	if err != nil {
-		WriteError(w, http.StatusNotFound, "not_found", "no such scheduled task")
+		if errors.Is(err, scheduler.ErrNoSuchTask) {
+			WriteError(w, http.StatusNotFound, "not_found", "no such scheduled task")
+			return
+		}
+		slog.Default().Error("run task failed", "name", name, "err", err)
+		WriteError(w, http.StatusInternalServerError, "internal", "internal error")
 		return
 	}
 	WriteJSON(w, http.StatusAccepted, map[string]string{"taskId": id})

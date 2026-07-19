@@ -26,11 +26,18 @@ func (f *fakeTasks) Scheduled() []scheduler.ScheduledTask {
 	}
 }
 func (f *fakeTasks) RunNow(name string) (string, error) {
-	if name != "Job" {
-		return "", fmt.Errorf("unknown task %q", name)
+	switch name {
+	case "Job":
+		f.ran = name
+		return "tid", nil
+	case "Boom":
+		// Simulates a real enqueue failure (e.g. ErrManagerStopped, id-gen
+		// failure, UpsertTask DB error) for a task that DOES exist — this is
+		// NOT a name-not-found case and must not satisfy errors.Is(err, scheduler.ErrNoSuchTask).
+		return "", fmt.Errorf("enqueue failed: %s", name)
+	default:
+		return "", fmt.Errorf("%w: %q", scheduler.ErrNoSuchTask, name)
 	}
-	f.ran = name
-	return "tid", nil
 }
 
 func tasksTestRouter(t *testing.T, ft *fakeTasks) (http.Handler, *store.Store) {
@@ -165,5 +172,13 @@ func TestRunSystemTask(t *testing.T) {
 	h.ServeHTTP(w, keyed(http.MethodPost, "/api/v1/system/tasks/Nope/run"))
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("unknown task want 404, got %d", w.Code)
+	}
+
+	// A non-name enqueue failure (task exists, but Enqueue itself failed)
+	// must surface as 500, not be conflated with the unknown-task 404 case.
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, keyed(http.MethodPost, "/api/v1/system/tasks/Boom/run"))
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("enqueue failure want 500, got %d body=%s", w.Code, w.Body.String())
 	}
 }

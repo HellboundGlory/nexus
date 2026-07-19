@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -98,8 +99,8 @@ func TestRunNowEnqueues(t *testing.T) {
 	if err != nil || id == "" {
 		t.Fatalf("RunNow: id=%q err=%v", id, err)
 	}
-	if _, err := sch.RunNow("Nope"); err == nil {
-		t.Fatal("unknown task should error")
+	if _, err := sch.RunNow("Nope"); !errors.Is(err, ErrNoSuchTask) {
+		t.Fatalf("unknown task should return ErrNoSuchTask, got %v", err)
 	}
 	// the enqueued command should run and increment n
 	deadline := time.Now().Add(time.Second)

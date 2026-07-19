@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { ToastProvider } from "@/lib/toast"
 import { TasksSection } from "@/features/system/TasksSection"
@@ -37,9 +37,14 @@ describe("TasksSection", () => {
   it("renders humanized scheduled + queue rows", () => {
     stub()
     renderTasks()
-    expect(screen.getByText("Import Completed Downloads")).toBeInTheDocument()
-    expect(screen.getByText("Download Queue Monitor")).toBeInTheDocument()
-    expect(screen.getByText(/running/i)).toBeInTheDocument() // the running queue row
+    // "ImportCompletedDownloads" appears both as a Scheduled row and as the
+    // running Queue row's name (glyph + name are now structurally uniform
+    // across statuses), so scope each assertion to its own table.
+    const scheduledTable = screen.getByTestId("scheduled-table")
+    const queueTable = screen.getByTestId("queue-table")
+    expect(within(scheduledTable).getByText("Import Completed Downloads")).toBeInTheDocument()
+    expect(within(queueTable).getByText("Download Queue Monitor")).toBeInTheDocument()
+    expect(within(queueTable).getByText(/running/i)).toBeInTheDocument() // the running queue row's "Running…" duration cell
   })
 
   it("runs a scheduled task", async () => {

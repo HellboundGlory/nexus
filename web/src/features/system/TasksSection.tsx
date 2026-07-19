@@ -14,7 +14,7 @@ export function TasksSection() {
         <h2 className="mb-2 text-sm font-semibold">Scheduled</h2>
         <div className="overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)]">
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full text-sm" data-testid="scheduled-table">
               <thead>
                 <tr className="text-left text-xs uppercase tracking-wide text-[var(--color-muted)]">
                   <th className="px-4 py-2.5 font-semibold">Name</th>
@@ -61,7 +61,7 @@ export function TasksSection() {
         </div>
         <div className="overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)]">
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full text-sm" data-testid="queue-table">
               <thead>
                 <tr className="text-left text-xs uppercase tracking-wide text-[var(--color-muted)]">
                   <th className="px-4 py-2.5 font-semibold">Name</th>
@@ -92,19 +92,10 @@ function QueueRow({ t }: { t: QueueTask }) {
   return (
     <tr className="border-t border-[var(--color-border)]">
       <td className="px-4 py-2.5">
-        {running ? (
-          // Merge glyph + name into a single text run: a running queue entry commonly
-          // shares its name with a Scheduled row, and keeping the name as a bare text
-          // node here would make it text-indistinguishable from that Scheduled row.
-          <span className={`flex items-center gap-2 ${glyphColor}`} aria-label={t.status}>
-            {glyph} {humanizeName(t.name)}
-          </span>
-        ) : (
-          <span className="flex items-center gap-2">
-            <span className={glyphColor} aria-label={t.status}>{glyph}</span>
-            {humanizeName(t.name)}
-          </span>
-        )}
+        <span className="flex items-center gap-2">
+          <span className={glyphColor} aria-label={t.status}>{glyph}</span>
+          {humanizeName(t.name)}
+        </span>
       </td>
       <td className="px-4 py-2.5 text-[var(--color-muted)]">{relativePast(t.queuedAt)}</td>
       <td className="px-4 py-2.5 text-[var(--color-muted)]">{t.startedAt ? relativePast(t.startedAt) : "—"}</td>

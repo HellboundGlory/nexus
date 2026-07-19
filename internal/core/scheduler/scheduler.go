@@ -1,12 +1,18 @@
 package scheduler
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 	"time"
 
 	"github.com/hellboundg/nexus/internal/core/command"
 )
+
+// ErrNoSuchTask is returned by RunNow when no scheduled task matches the
+// given name. Any other error from RunNow indicates the task was found but
+// enqueueing it failed.
+var ErrNoSuchTask = errors.New("scheduler: no such task")
 
 type entry struct {
 	name     string
@@ -89,7 +95,7 @@ func (s *Scheduler) RunNow(name string) (string, error) {
 			return s.mgr.Enqueue(e.factory())
 		}
 	}
-	return "", fmt.Errorf("scheduler: no task named %q", name)
+	return "", fmt.Errorf("%w: %q", ErrNoSuchTask, name)
 }
 
 // Stop is safe to call multiple times.
