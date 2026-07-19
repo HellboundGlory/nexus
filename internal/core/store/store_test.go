@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -157,5 +158,106 @@ func TestLastTaskByName(t *testing.T) {
 	}
 	if last == nil || last.Name != "Job" {
 		t.Fatalf("want a Job task, got %+v", last)
+	}
+}
+
+func TestPruneTasksPerName(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+
+	// A frequent task with 60 terminal rows, plus a queued and a running row.
+	for i := 0; i < 60; i++ {
+		if err := st.UpsertTask(ctx, Task{ID: fmt.Sprintf("f%d", i), Name: "Frequent", Status: "completed"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.UpsertTask(ctx, Task{ID: "fq", Name: "Frequent", Status: "queued"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertTask(ctx, Task{ID: "fr", Name: "Frequent", Status: "running"}); err != nil {
+		t.Fatal(err)
+	}
+	// An infrequent task with a SINGLE old terminal row — must survive.
+	if err := st.UpsertTask(ctx, Task{ID: "r0", Name: "Rare", Status: "completed"}); err != nil {
+		t.Fatal(err)
+	}
+
+	deleted, err := st.PruneTasksPerName(ctx, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 60 Frequent completed - 50 kept = 10 deleted; Rare/queued/running untouched.
+	if deleted != 10 {
+		t.Fatalf("want 10 deleted, got %d", deleted)
+	}
+
+	rows, err := st.ListTasks(ctx, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	counts := map[string]int{} // "name/status" -> count
+	for _, r := range rows {
+		counts[r.Name+"/"+r.Status]++
+	}
+	if counts["Frequent/completed"] != 50 {
+		t.Fatalf("Frequent completed should be capped at 50, got %d", counts["Frequent/completed"])
+	}
+	if counts["Rare/completed"] != 1 {
+		t.Fatalf("Rare's lone terminal row must survive, got %d", counts["Rare/completed"])
+	}
+	if counts["Frequent/queued"] != 1 || counts["Frequent/running"] != 1 {
+		t.Fatalf("queued/running must never be pruned, got queued=%d running=%d",
+			counts["Frequent/queued"], counts["Frequent/running"])
+	}
+}
+
+func TestPruneTasksPerNameBelowThreshold(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+	for i := 0; i < 3; i++ {
+		_ = st.UpsertTask(ctx, Task{ID: fmt.Sprintf("x%d", i), Name: "X", Status: "completed"})
+	}
+	deleted, err := st.PruneTasksPerName(ctx, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deleted != 0 {
+		t.Fatalf("below threshold should delete nothing, got %d", deleted)
+	}
+}
+
+func TestPruneTasksPerNameNonPositiveKeepIsNoop(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+	for i := 0; i < 3; i++ {
+		_ = st.UpsertTask(ctx, Task{ID: fmt.Sprintf("z%d", i), Name: "Z", Status: "completed"})
+	}
+	deleted, err := st.PruneTasksPerName(ctx, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deleted != 0 {
+		t.Fatalf("keep<=0 must be a no-op, got %d deleted", deleted)
+	}
+	rows, _ := st.ListTasks(ctx, 100)
+	if len(rows) != 3 {
+		t.Fatalf("no rows should be deleted, got %d remaining", len(rows))
+	}
+}
+
+func TestCountActiveTasks(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+	_ = st.UpsertTask(ctx, Task{ID: "a", Name: "N", Status: "queued"})
+	_ = st.UpsertTask(ctx, Task{ID: "b", Name: "N", Status: "running"})
+	_ = st.UpsertTask(ctx, Task{ID: "c", Name: "N", Status: "completed"})
+	_ = st.UpsertTask(ctx, Task{ID: "d", Name: "N", Status: "failed"})
+
+	n, err := st.CountActiveTasks(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Fatalf("want 2 active (queued+running), got %d", n)
 	}
 }

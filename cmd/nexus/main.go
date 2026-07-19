@@ -173,6 +173,10 @@ func run(ctx context.Context) error {
 			return automation.NewUpgradeSearchCommand(autoSvc)
 		})
 	}
+	const taskRetention = 50 // newest terminal rows kept per task name
+	sch.Every(time.Hour, func() command.Command {
+		return command.NewPruneTasks(st, taskRetention)
+	})
 	sch.Start()
 
 	authSvc := auth.NewService(st, cfg.APIKey)

@@ -52,7 +52,7 @@ func durationSeconds(start, end *time.Time) *int {
 }
 
 func (s *server) handleStatus(w http.ResponseWriter, r *http.Request) {
-	tasks, err := s.deps.Store.ListTasks(r.Context(), 100)
+	count, err := s.deps.Store.CountActiveTasks(r.Context())
 	if err != nil {
 		slog.Default().Error("status failed", "err", err)
 		WriteError(w, http.StatusInternalServerError, "internal", "internal error")
@@ -62,7 +62,7 @@ func (s *server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		Version:   s.deps.Version,
 		AppName:   "Nexus",
 		Healthy:   true,
-		TaskCount: len(tasks),
+		TaskCount: count,
 	})
 }
 
@@ -95,7 +95,7 @@ func (s *server) handleTasks(w http.ResponseWriter, r *http.Request) {
 		out.Scheduled = append(out.Scheduled, dto)
 	}
 
-	rows, err := s.deps.Store.ListTasks(r.Context(), 50)
+	rows, err := s.deps.Store.ListTasks(r.Context(), 10)
 	if err != nil {
 		WriteError(w, http.StatusInternalServerError, "internal", "internal error")
 		return

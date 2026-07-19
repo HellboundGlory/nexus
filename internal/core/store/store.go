@@ -205,3 +205,35 @@ func (s *Store) ListTasks(ctx context.Context, limit int) ([]Task, error) {
 	}
 	return out, rows.Err()
 }
+
+// PruneTasksPerName deletes terminal (completed/failed) task rows beyond the
+// newest `keep` per task name. Queued/running rows are never deleted. Returns
+// the number of rows removed. Per-name retention keeps every task's most recent
+// terminal row so the Scheduled table's Last Execution never goes blank.
+func (s *Store) PruneTasksPerName(ctx context.Context, keep int) (int64, error) {
+	if keep <= 0 {
+		return 0, nil
+	}
+	res, err := s.db.ExecContext(ctx,
+		`DELETE FROM tasks
+		 WHERE status IN ('completed','failed')
+		   AND id NOT IN (
+		     SELECT id FROM (
+		       SELECT id, ROW_NUMBER() OVER (
+		         PARTITION BY name ORDER BY created_at DESC, rowid DESC) AS rn
+		       FROM tasks
+		       WHERE status IN ('completed','failed'))
+		     WHERE rn <= ?)`, keep)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// CountActiveTasks returns the number of queued or running task rows.
+func (s *Store) CountActiveTasks(ctx context.Context) (int, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM tasks WHERE status IN ('queued','running')`).Scan(&n)
+	return n, err
+}

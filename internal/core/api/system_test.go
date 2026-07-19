@@ -182,3 +182,51 @@ func TestRunSystemTask(t *testing.T) {
 		t.Fatalf("enqueue failure want 500, got %d body=%s", w.Code, w.Body.String())
 	}
 }
+
+func TestStatusTaskCountIsActiveOnly(t *testing.T) {
+	ft := &fakeTasks{}
+	h, st := tasksTestRouter(t, ft)
+	ctx := context.Background()
+	_ = st.UpsertTask(ctx, store.Task{ID: "a", Name: "N", Status: "queued"})
+	_ = st.UpsertTask(ctx, store.Task{ID: "b", Name: "N", Status: "running"})
+	_ = st.UpsertTask(ctx, store.Task{ID: "c", Name: "N", Status: "completed"})
+	_ = st.UpsertTask(ctx, store.Task{ID: "d", Name: "N", Status: "failed"})
+
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, keyed(http.MethodGet, "/api/v1/system/status"))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	var body struct {
+		TaskCount int `json:"taskCount"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.TaskCount != 2 {
+		t.Fatalf("taskCount should count active (queued+running) only, want 2 got %d", body.TaskCount)
+	}
+}
+
+func TestSystemTasksQueueCappedAtTen(t *testing.T) {
+	ft := &fakeTasks{}
+	h, st := tasksTestRouter(t, ft)
+	ctx := context.Background()
+	for i := 0; i < 15; i++ {
+		_ = st.UpsertTask(ctx, store.Task{ID: fmt.Sprintf("t%d", i), Name: "Job", Status: "completed"})
+	}
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, keyed(http.MethodGet, "/api/v1/system/tasks"))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	var body struct {
+		Queue []map[string]json.RawMessage `json:"queue"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Queue) != 10 {
+		t.Fatalf("Queue should be capped at 10, got %d", len(body.Queue))
+	}
+}

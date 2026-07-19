@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"testing"
 	"time"
@@ -165,6 +166,48 @@ func TestRunMountsQualityRoutes(t *testing.T) {
 	}
 	if status != http.StatusOK {
 		t.Fatalf("GET /api/v1/quality/definitions status = %d want 200", status)
+	}
+}
+
+func TestRunRegistersHousekeepingTask(t *testing.T) {
+	t.Setenv("NEXUS_DATA_DIR", t.TempDir())
+	t.Setenv("NEXUS_PORT", "9596")
+	t.Setenv("NEXUS_API_KEY", "testkey")
+	t.Setenv("NEXUS_ADMIN_PASSWORD", "adminpw")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() { errCh <- run(ctx) }()
+	defer func() { cancel(); <-errCh }()
+
+	deadline := time.Now().Add(5 * time.Second)
+	found := false
+	for time.Now().Before(deadline) && !found {
+		req, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:9596/api/v1/system/tasks", nil)
+		req.Header.Set("X-Api-Key", "testkey")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			time.Sleep(50 * time.Millisecond)
+			continue
+		}
+		var body struct {
+			Scheduled []struct {
+				Name string `json:"name"`
+			} `json:"scheduled"`
+		}
+		_ = json.NewDecoder(resp.Body).Decode(&body)
+		resp.Body.Close()
+		for _, s := range body.Scheduled {
+			if s.Name == "Housekeeping" {
+				found = true
+			}
+		}
+		if !found {
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+	if !found {
+		t.Fatal("Housekeeping scheduled task not registered")
 	}
 }
 
