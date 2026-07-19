@@ -2,7 +2,6 @@ import { createBrowserRouter } from "react-router-dom"
 import { RequireAuth } from "@/lib/auth"
 import { Layout } from "@/app/Layout"
 import { Login } from "@/pages/Login"
-import { Placeholder } from "@/pages/Placeholder"
 import { Dashboard } from "@/pages/Dashboard"
 import { Movies } from "@/pages/Movies"
 import { TvShows } from "@/pages/TvShows"
@@ -17,6 +16,7 @@ import { MediaManagementSection } from "@/features/settings/MediaManagementSecti
 import { GeneralSection } from "@/features/settings/GeneralSection"
 import { SystemLayout } from "@/features/system/SystemLayout"
 import { StatusSection } from "@/features/system/StatusSection"
+import { TasksSection } from "@/features/system/TasksSection"
 import { ActivityLayout } from "@/features/activity/ActivityLayout"
 import { QueueSection } from "@/features/activity/QueueSection"
 import { HistorySection } from "@/features/activity/HistorySection"
@@ -69,7 +69,7 @@ export const router = createBrowserRouter([
         children: [
           { index: true, element: <Navigate to="/system/status" replace /> },
           { path: "status", element: <StatusSection /> },
-          { path: "tasks", element: <Placeholder title="Tasks" /> },
+          { path: "tasks", element: <TasksSection /> },
         ],
       },
     ],
