@@ -41,7 +41,7 @@ user confirmed is the desired behaviour.
   download client and deletes its data.
 - Optionally blocklist a release at the moment it is removed from the queue.
 - Refuse to clear the queue when a download client is unreachable, rather than
-  silently orphaning downloads.
+  silently orphaning downloads — with an explicit, opt-in force override.
 
 **Non-goals**
 
@@ -204,12 +204,12 @@ live `progress` / `downloadStatus` via `matchItem`.
 
 ### 4.4 API — clear endpoints
 
-**`DELETE /queue` → `{ "removed": N }`, or 503 and no deletions.**
+**`DELETE /queue[?force=]` → `{ "removed": N }`, or 503 and no deletions.**
 
-Preflight: call `queue.Queue(ctx)` once. If `len(ClientErrors) > 0`, refuse
-immediately with 503 `client_unavailable` and a message naming the failing clients
-— **nothing is deleted**. This is the user-chosen behaviour: better to block the
-clear than to orphan downloads that Nexus can no longer see.
+Preflight: call `queue.Queue(ctx)` once. If `len(ClientErrors) > 0` and `force` is
+not set, refuse immediately with 503 `client_unavailable` and a message naming the
+failing clients — **nothing is deleted**. This is the user-chosen default: better
+to block the clear than to orphan downloads that Nexus can no longer see.
 
 Otherwise, for each row: resolve the live item from the snapshot via `matchItem`;
 when matched call `queue.Remove(clientID, itemID, true)` (`deleteData: true`, so
@@ -223,6 +223,31 @@ A `Remove` call that fails *after* the preflight passed (a client that dropped
 mid-sweep) aborts the loop and returns 503; rows already removed stay removed.
 This is a genuinely partial outcome, but every row it removed was removed
 correctly from both sides, and re-pressing Clear resumes from where it stopped.
+
+**`?force=true`** changes exactly two things and nothing else:
+
+1. The preflight refusal is skipped.
+2. A failing `Remove` is `slog.Warn`-ed and the loop continues, rather than
+   aborting with 503.
+
+The DB row is deleted either way, so a forced clear always empties the queue. It
+never changes *what* is attempted — `Remove` is still called for every matched row,
+with `deleteData: true`. Force is about tolerating failure, not skipping the work;
+a client that comes back mid-force still gets its downloads cancelled properly.
+
+The response reports what actually happened so a forced clear is not silent:
+
+```json
+{ "removed": 12, "clientErrors": [ { "clientId": "sab", "message": "…" } ] }
+```
+
+`clientErrors` is omitted when empty, so the non-forced happy path keeps the
+simple `{ "removed": N }` shape.
+
+**Force is deliberately not offered on single-item removal** (§4.5). The
+`removeFromClient=false` path already produces the identical outcome there — row
+deleted, client untouched — and a second flag meaning the same thing would be
+redundant surface area.
 
 **`DELETE /history` → `{ "removed": N }`** via `store.ClearHistory`.
 **`DELETE /blocklist` → `{ "removed": N }`** via `store.ClearBlocklist`.
@@ -293,9 +318,24 @@ Each section gains a Clear button in a small header row above its table, behind 
 confirm dialog naming the row count (e.g. "Clear all 1,234 history events?"). The
 Clear button is hidden when there is nothing to clear.
 
-A 503 from either queue endpoint surfaces as an error toast carrying the server's
+A 503 from single-item removal surfaces as an error toast carrying the server's
 message (which names the unreachable client), via the existing `ApiError` handling
 already used in `QueueSection`.
+
+**Force is surfaced only where and when it is needed.** There is no force control
+in the normal Clear queue dialog. When a clear is refused with 503, the dialog
+stays open and switches to a warning state showing the server's message and a
+single **Clear anyway** button, which re-issues the call with `force=true`. So the
+override is undiscoverable until the exact moment it is the right answer, and
+using it is a deliberate second action rather than a checkbox someone leaves
+ticked.
+
+After a forced clear that returned `clientErrors`, the success toast says so —
+e.g. "Queue cleared (12 items). 1 download client could not be reached; its
+downloads may still be running." Silently reporting plain success would hide the
+orphans the refusal existed to prevent.
+
+`useClearQueue()` therefore takes `{ force }`.
 
 `useActivityInvalidation` is unchanged — it already invalidates all three keys, and
 query keys that now include page state still match by prefix.
@@ -307,6 +347,7 @@ query keys that now include page state still match by prefix.
 | Store error on a paged read | 500, as today |
 | `DELETE /queue` with any client unreachable | 503, nothing deleted |
 | Client drops mid-clear | 503; rows already removed stay removed |
+| `DELETE /queue?force=true` with a client unreachable | Queue emptied; failures logged and reported in `clientErrors` |
 | `DELETE /queue/{id}`, client call fails, `removeFromClient=true` | 503, row kept |
 | `DELETE /queue/{id}`, `removeFromClient=false` | Row deleted unconditionally |
 | Row has no live client match | Not an error; row deleted |
@@ -328,6 +369,14 @@ query keys that now include page state still match by prefix.
 - `ClearQueue` happy path: removes from client with `deleteData: true`, empties the
   table, returns the count.
 - `ClearQueue` where a row has no live match: row deleted, no `Remove` call.
+- `ClearQueue` with `force`: unreachable client no longer refuses — queue emptied,
+  and the returned `clientErrors` is non-empty (asserting force *reports* rather
+  than hides).
+- `ClearQueue` with `force` where `Remove` itself errors: loop continues, every row
+  deleted — the mid-sweep-drop case, which is distinct from the preflight case and
+  is the one that would regress if force were implemented as preflight-skip only.
+- `ClearQueue` with `force` and a *healthy* client: `Remove` is still called for
+  every matched row with `deleteData: true` (force must not become "skip the work").
 - `RemoveQueueItem`: removes from client when `removeFromClient`, does not when not;
   writes a blocklist row when `blocklist`; **row kept** when the client call fails
   with `removeFromClient=true`; row deleted when the client call fails but
@@ -357,11 +406,13 @@ settable `ClientErrors` field.
 |---|---|
 | Changing `QueueReader.Queue`'s signature misses a call site | Compiler-enforced; three call sites and two implementers, all in-repo and enumerated in §4.2 |
 | Wire-shape change breaks a consumer | Only `HistorySection`/`BlocklistSection` consume the two changed endpoints; `GET /queue` deliberately left alone; verified by grep for the endpoint strings |
-| Refusing to clear leaves the user stuck when a client is permanently gone (e.g. deleted from config) | `route`/`Remove` return `ErrClientUnavailable` for an unknown-or-disabled client, so a removed client blocks the clear. Escape hatch: per-row removal with **Remove from download client** unchecked. Accepted; if it proves annoying in practice, a "force" flag on `DELETE /queue` is the natural follow-up |
+| Refusing to clear leaves the user stuck when a client is permanently gone (e.g. deleted from config) | `route`/`Remove` return `ErrClientUnavailable` for an unknown-or-disabled client, so a removed client would otherwise block the clear forever. Solved by `?force=true` (§4.4), surfaced in the UI only after a refusal |
+| Force becomes the habitual path and silently orphans downloads | No force control in the normal dialog — it appears only after a refusal, as a distinct second action; and a forced clear that hit errors reports them in both the response and the toast (§4.6) |
 | Remove-without-blocklist causes an immediate re-grab | Checkbox plus inline explanation (§3.3) |
 | Partial clear on a mid-sweep client drop | Every row removed was removed correctly from both sides; re-pressing Clear resumes (§4.4) |
 
 ## 7. Open questions
 
-None. Design and both amendments (no queue pagination; refuse-to-clear on
-unreachable client) approved by the user 2026-07-19.
+None. Design and all three amendments (no queue pagination; refuse-to-clear on
+unreachable client; `?force=true` override built now rather than deferred)
+approved by the user 2026-07-19.
