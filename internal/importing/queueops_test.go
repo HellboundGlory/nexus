@@ -37,6 +37,9 @@ func TestRemoveQueueItemRemovesFromClientByDefault(t *testing.T) {
 	if !q.removed["h1"] {
 		t.Fatal("expected the download to be removed from the client")
 	}
+	if !q.removedDeleteData["h1"] {
+		t.Fatal("Remove must be called with deleteData: true, so partial files go too")
+	}
 	if _, err := st.GetQueueItem(context.Background(), row.ID); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("queue row still present, err = %v", err)
 	}
@@ -96,6 +99,39 @@ func TestRemoveQueueItemWithNoLiveMatchDeletesRow(t *testing.T) {
 	}
 	if _, err := st.GetQueueItem(context.Background(), row.ID); !errors.Is(err, store.ErrNotFound) {
 		t.Fatal("row should be deleted")
+	}
+}
+
+// No live match AND an unreachable client is the orphaning hole this closes:
+// an unreachable client contributes zero items to the snapshot, so it is
+// indistinguishable from "finished" unless ClientErrors is also checked.
+// Mirrors ClearQueue's preflight refusal (§4.4) at the single-item level.
+func TestRemoveQueueItemRefusesWhenClientIsUnreachable(t *testing.T) {
+	q := &fakeQueue{clientErrors: []ClientError{{ClientID: "sab", Message: "connection refused"}}}
+	svc, st := newSvcWithQueue(t, q)
+	row := seedQueueRow(t, st, "h1", "Dune.2021-GRP")
+
+	err := svc.RemoveQueueItem(context.Background(), row.ID, RemoveOptions{RemoveFromClient: true})
+	if !errors.Is(err, ErrClientUnavailable) {
+		t.Fatalf("err = %v, want ErrClientUnavailable", err)
+	}
+	if _, err := st.GetQueueItem(context.Background(), row.ID); err != nil {
+		t.Fatal("row must be KEPT when the client is unreachable — deleting it would orphan the download")
+	}
+}
+
+// The escape hatch still works even when the reason for "no live match" is an
+// unreachable client rather than a failed Remove call.
+func TestRemoveQueueItemUnreachableClientEscapeHatchDeletesRow(t *testing.T) {
+	q := &fakeQueue{clientErrors: []ClientError{{ClientID: "sab", Message: "connection refused"}}}
+	svc, st := newSvcWithQueue(t, q)
+	row := seedQueueRow(t, st, "h1", "Dune.2021-GRP")
+
+	if err := svc.RemoveQueueItem(context.Background(), row.ID, RemoveOptions{RemoveFromClient: false}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.GetQueueItem(context.Background(), row.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatal("escape hatch failed: row should be gone")
 	}
 }
 
@@ -160,6 +196,9 @@ func TestClearQueueRemovesEveryRowAndItsDownload(t *testing.T) {
 	}
 	if !q.removed["h1"] || !q.removed["h2"] {
 		t.Fatalf("both downloads should be removed from the client, got %v", q.removed)
+	}
+	if !q.removedDeleteData["h1"] || !q.removedDeleteData["h2"] {
+		t.Fatalf("Remove must be called with deleteData: true, so partial files go too, got %v", q.removedDeleteData)
 	}
 	if rows, _ := st.ListQueue(context.Background()); len(rows) != 0 {
 		t.Fatalf("%d rows left, want 0", len(rows))

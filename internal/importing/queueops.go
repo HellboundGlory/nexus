@@ -26,6 +26,17 @@ type RemoveOptions struct {
 
 // RemoveQueueItem deletes one queue row, optionally cancelling its download and
 // blocklisting the release first.
+//
+// When RemoveFromClient is true, a missing live match is read three ways:
+//   - No match, and every client answered (ClientErrors is empty): the client
+//     has already finished with this download, so there is nothing to cancel.
+//     The row is deleted normally.
+//   - No match, but ClientErrors is non-empty: the snapshot is partial, so an
+//     unreachable client is indistinguishable from a download it still has.
+//     Refuse rather than risk orphaning it — the row is KEPT. This mirrors
+//     ClearQueue's preflight (§4.4).
+//   - A live match whose Remove call fails: the download is still running and
+//     the client told us so. Refuse and keep the row, same as above.
 func (s *Service) RemoveQueueItem(ctx context.Context, id int64, opts RemoveOptions) error {
 	row, err := s.store.GetQueueItem(ctx, id)
 	if err != nil {
@@ -39,9 +50,17 @@ func (s *Service) RemoveQueueItem(ctx context.Context, id int64, opts RemoveOpti
 				// row now would orphan it with nothing tracking it.
 				return fmt.Errorf("%w: %s", ErrClientUnavailable, err)
 			}
+		} else if len(snap.ClientErrors) > 0 {
+			// No live match, but the snapshot is incomplete: an unreachable
+			// client contributes zero items, so it looks identical to "the
+			// client has already finished with this download." We cannot tell
+			// them apart, so refuse rather than risk orphaning a download that
+			// is still running on the client we couldn't reach.
+			return fmt.Errorf("%w: %s", ErrClientUnavailable, describeClientErrors(snap.ClientErrors))
 		}
-		// No live match: the client has already finished with this download,
-		// so there is nothing to cancel. Deleting the row is correct.
+		// No live match and every client answered: the client has already
+		// finished with this download, so there is nothing to cancel. Deleting
+		// the row is correct.
 	}
 	if opts.Blocklist {
 		if _, err := s.store.AddBlocklist(ctx, store.Blocklist{
@@ -86,7 +105,7 @@ func (s *Service) ClearQueue(ctx context.Context, force bool) (ClearResult, erro
 	}
 	rows, err := s.store.ListQueue(ctx)
 	if err != nil {
-		return ClearResult{}, err
+		return res, err
 	}
 	for _, row := range rows {
 		if it, ok := matchItem(snap.Items, row); ok {

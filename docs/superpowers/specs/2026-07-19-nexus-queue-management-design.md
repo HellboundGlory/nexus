@@ -274,8 +274,13 @@ unchecking "Remove from download client", which deletes the row unconditionally 
 so the user is never trapped with an undeletable row, but has to opt into
 orphaning it.
 
-A row with no live match is not a failure — the client has nothing to remove, so
-the row is deleted.
+A row with no live match splits the same way §4.4's preflight does: if every
+client answered the snapshot, the client genuinely has nothing to remove, so
+the row is deleted — not a failure. But an unreachable client contributes zero
+items to the snapshot, which looks identical to "finished" unless
+`ClientErrors` is also checked; when it is non-empty the picture is incomplete,
+so the request is refused the same as a failed `Remove` call, and the row is
+kept.
 
 The blocklist entry mirrors the shape `handleFailed` writes
 (`internal/importing/command.go:51-56`), with `Reason: "removed from queue"`.
@@ -350,7 +355,8 @@ query keys that now include page state still match by prefix.
 | `DELETE /queue?force=true` with a client unreachable | Queue emptied; failures logged and reported in `clientErrors` |
 | `DELETE /queue/{id}`, client call fails, `removeFromClient=true` | 503, row kept |
 | `DELETE /queue/{id}`, `removeFromClient=false` | Row deleted unconditionally |
-| Row has no live client match | Not an error; row deleted |
+| Row has no live client match, every client answered | Not an error; row deleted |
+| Row has no live client match, a client is unreachable (`ClientErrors` non-empty) | 503, row kept — indistinguishable from a download that client still has |
 | `store.ErrNotFound` on single removal | 404 (existing behaviour preserved) |
 | Blocklist insert fails | Abort before deleting the row, so a retry loses nothing |
 
