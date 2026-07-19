@@ -23,6 +23,9 @@ type TaskScheduler interface {
 	RunNow(name string) (string, error)
 }
 
+// Compile-time assertion that the concrete scheduler satisfies TaskScheduler.
+var _ TaskScheduler = (*scheduler.Scheduler)(nil)
+
 type Deps struct {
 	Auth      *auth.Service
 	Store     *store.Store

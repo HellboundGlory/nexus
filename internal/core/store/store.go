@@ -129,8 +129,10 @@ func (s *Store) DeleteSession(ctx context.Context, token string) error {
 
 func (s *Store) UpsertTask(ctx context.Context, t Task) error {
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO tasks (id, name, status, progress, message)
-		 VALUES (?, ?, ?, ?, ?)
+		`INSERT INTO tasks (id, name, status, progress, message, started_at, ended_at)
+		 VALUES (?, ?, ?, ?, ?,
+		         CASE WHEN ? = 'running' THEN CURRENT_TIMESTAMP ELSE NULL END,
+		         CASE WHEN ? IN ('completed','failed') THEN CURRENT_TIMESTAMP ELSE NULL END)
 		 ON CONFLICT(id) DO UPDATE SET
 		   status = excluded.status,
 		   progress = excluded.progress,
@@ -140,7 +142,7 @@ func (s *Store) UpsertTask(ctx context.Context, t Task) error {
 		                     THEN CURRENT_TIMESTAMP ELSE started_at END,
 		   ended_at   = CASE WHEN excluded.status IN ('completed','failed')
 		                     THEN CURRENT_TIMESTAMP ELSE ended_at END`,
-		t.ID, t.Name, t.Status, t.Progress, t.Message)
+		t.ID, t.Name, t.Status, t.Progress, t.Message, t.Status, t.Status)
 	return err
 }
 

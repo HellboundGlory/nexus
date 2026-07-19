@@ -1,9 +1,10 @@
-import { useTasks, useRunTask, type QueueTask } from "./systemApi"
+import { useTasks, useRunTask, useTasksInvalidation, type QueueTask } from "./systemApi"
 import { formatDuration, humanizeInterval, humanizeName, relativePast, relativeFuture } from "./format"
 
 export function TasksSection() {
   const q = useTasks()
   const run = useRunTask()
+  useTasksInvalidation()
 
   if (q.isLoading || !q.data) return <div className="p-6 text-sm text-[var(--color-muted)]">Loading…</div>
   const { scheduled, queue } = q.data

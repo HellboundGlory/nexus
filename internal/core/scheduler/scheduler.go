@@ -44,7 +44,10 @@ func New(m *command.Manager) *Scheduler {
 // Every registers a recurring command produced by factory at each interval.
 // The task's name is captured once via factory().Name().
 func (s *Scheduler) Every(d time.Duration, factory func() command.Command) {
-	s.entries = append(s.entries, &entry{name: factory().Name(), interval: d, factory: factory})
+	e := &entry{name: factory().Name(), interval: d, factory: factory}
+	s.mu.Lock()
+	s.entries = append(s.entries, e)
+	s.mu.Unlock()
 }
 
 func (s *Scheduler) Start() {
@@ -90,12 +93,23 @@ func (s *Scheduler) Scheduled() []ScheduledTask {
 
 // RunNow enqueues the named task immediately and returns its task id.
 func (s *Scheduler) RunNow(name string) (string, error) {
+	var factory func() command.Command
+	found := false
+
+	s.mu.Lock()
 	for _, e := range s.entries {
 		if e.name == name {
-			return s.mgr.Enqueue(e.factory())
+			factory = e.factory
+			found = true
+			break
 		}
 	}
-	return "", fmt.Errorf("%w: %q", ErrNoSuchTask, name)
+	s.mu.Unlock()
+
+	if !found {
+		return "", fmt.Errorf("%w: %q", ErrNoSuchTask, name)
+	}
+	return s.mgr.Enqueue(factory())
 }
 
 // Stop is safe to call multiple times.

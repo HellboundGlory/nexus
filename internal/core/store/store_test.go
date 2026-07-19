@@ -122,6 +122,27 @@ func TestTaskTimestampsLifecycle(t *testing.T) {
 	}
 }
 
+func TestTaskTimestampsFirstInsertRunning(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+
+	// First-ever UpsertTask for this id goes straight to the INSERT branch
+	// (no prior queued row); status "running" must still derive started_at.
+	if err := st.UpsertTask(ctx, Task{ID: "t1", Name: "Job", Status: "running"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.GetTask(ctx, "t1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.StartedAt == nil {
+		t.Fatal("first-ever running insert should set started_at, got nil")
+	}
+	if got.EndedAt != nil {
+		t.Fatalf("first-ever running insert should leave ended_at nil, got %+v", got.EndedAt)
+	}
+}
+
 func TestLastTaskByName(t *testing.T) {
 	st := newTestStore(t)
 	ctx := context.Background()

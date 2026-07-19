@@ -9,6 +9,7 @@ vi.mock("@/features/system/systemApi", async (orig) => ({
   ...(await orig<typeof import("@/features/system/systemApi")>()),
   useTasks: vi.fn(),
   useRunTask: vi.fn(),
+  useTasksInvalidation: vi.fn(),
 }))
 vi.mock("@/lib/activity", () => ({ useActivity: () => [] }))
 

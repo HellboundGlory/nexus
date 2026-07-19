@@ -26,18 +26,20 @@ export type TasksData = { scheduled: ScheduledTask[]; queue: QueueTask[] }
 export const systemKeys = { tasks: ["system", "tasks"] as const }
 
 export function useTasks() {
+  return useQuery({ queryKey: systemKeys.tasks, queryFn: () => apiGet<TasksData>("/system/tasks") })
+}
+
+// Live: refetch the tasks query when a task.updated event arrives. Scoped to
+// components that own a live tasks view (mirrors useActivityInvalidation).
+export function useTasksInvalidation(): void {
   const events = useActivity()
   const qc = useQueryClient()
-  const query = useQuery({ queryKey: systemKeys.tasks, queryFn: () => apiGet<TasksData>("/system/tasks") })
 
-  // Live: refetch when a task.updated event arrives.
   useEffect(() => {
     if (events.some((e) => e.type === "task.updated")) {
       qc.invalidateQueries({ queryKey: systemKeys.tasks })
     }
   }, [events, qc])
-
-  return query
 }
 
 export function useRunTask() {

@@ -19,6 +19,7 @@ export function SystemLayout() {
               className={({ isActive }) =>
                 cn(
                   "rounded-t-md px-4 py-2 text-sm text-[var(--color-muted)]",
+                  // Active-tab treatment mirrors SettingsLayout/Sidebar (brand #7c5cff at 16% alpha).
                   isActive && "bg-[rgba(124,92,255,0.16)] font-semibold text-[var(--color-fg)]",
                 )
               }

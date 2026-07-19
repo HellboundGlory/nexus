@@ -81,6 +81,46 @@ func TestScheduledSnapshot(t *testing.T) {
 	}
 }
 
+func TestSchedulerEmptyEntries(t *testing.T) {
+	db, _ := database.Open(t.TempDir() + "/t.db")
+	defer db.Close()
+	database.Migrate(db)
+	m := command.NewManager(store.New(db), events.New(), 1)
+	m.Start()
+	defer m.Stop()
+
+	sch := New(m)
+	// no Every registrations at all
+
+	if got := sch.Scheduled(); len(got) != 0 {
+		t.Fatalf("want 0 scheduled entries, got %d", len(got))
+	}
+	if _, err := sch.RunNow("anything"); !errors.Is(err, ErrNoSuchTask) {
+		t.Fatalf("RunNow on empty scheduler should return ErrNoSuchTask, got %v", err)
+	}
+}
+
+func TestSchedulerDuplicateNames(t *testing.T) {
+	db, _ := database.Open(t.TempDir() + "/t.db")
+	defer db.Close()
+	database.Migrate(db)
+	m := command.NewManager(store.New(db), events.New(), 1)
+	m.Start()
+	defer m.Stop()
+
+	var n int32
+	sch := New(m)
+	sch.Every(time.Hour, func() command.Command { return countCmd{n: &n} })
+	sch.Every(2*time.Hour, func() command.Command { return countCmd{n: &n} })
+
+	if got := sch.Scheduled(); len(got) != 2 {
+		t.Fatalf("want 2 scheduled entries, got %d", len(got))
+	}
+	if _, err := sch.RunNow("Count"); err != nil {
+		t.Fatalf("RunNow should match the first duplicate-named entry, got err=%v", err)
+	}
+}
+
 func TestRunNowEnqueues(t *testing.T) {
 	db, _ := database.Open(t.TempDir() + "/t.db")
 	defer db.Close()

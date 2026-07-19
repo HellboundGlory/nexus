@@ -6,15 +6,13 @@ import * as apiClient from "@/lib/api"
 import * as activityLib from "@/lib/activity"
 import { ToastProvider, useToast } from "@/lib/toast"
 import type { ActivityEvent } from "@/lib/ws"
-import { useTasks, useRunTask, systemKeys } from "@/features/system/systemApi"
+import { useRunTask, useTasksInvalidation, systemKeys } from "@/features/system/systemApi"
 
 vi.mock("@/lib/api", async (orig) => {
   const actual = await orig<typeof import("@/lib/api")>()
   return { ...actual, apiGet: vi.fn(), apiPost: vi.fn() }
 })
 vi.mock("@/lib/activity", () => ({ useActivity: vi.fn() }))
-
-const emptyTasks = { scheduled: [], queue: [] }
 
 function makeClient() {
   return new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -39,28 +37,25 @@ function otherEvent(): ActivityEvent {
 
 beforeEach(() => vi.clearAllMocks())
 
-describe("useTasks", () => {
+describe("useTasksInvalidation", () => {
   it("invalidates the tasks query when a task.updated event arrives", async () => {
-    vi.mocked(apiClient.apiGet).mockResolvedValue(emptyTasks)
     vi.mocked(activityLib.useActivity).mockReturnValue([taskUpdatedEvent()])
 
     const qc = makeClient()
     const invalidateSpy = vi.spyOn(qc, "invalidateQueries")
 
-    renderHook(() => useTasks(), { wrapper: wrapper(qc) })
+    renderHook(() => useTasksInvalidation(), { wrapper: wrapper(qc) })
 
     await waitFor(() => expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: systemKeys.tasks }))
   })
 
-  it("does not invalidate when no task.updated event is present", async () => {
-    vi.mocked(apiClient.apiGet).mockResolvedValue(emptyTasks)
+  it("does not invalidate when no task.updated event is present", () => {
     vi.mocked(activityLib.useActivity).mockReturnValue([otherEvent()])
 
     const qc = makeClient()
     const invalidateSpy = vi.spyOn(qc, "invalidateQueries")
 
-    const { result } = renderHook(() => useTasks(), { wrapper: wrapper(qc) })
-    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    renderHook(() => useTasksInvalidation(), { wrapper: wrapper(qc) })
 
     expect(invalidateSpy).not.toHaveBeenCalled()
   })
