@@ -226,3 +226,11 @@ func (s *Store) PruneTasksPerName(ctx context.Context, keep int) (int64, error) 
 	}
 	return res.RowsAffected()
 }
+
+// CountActiveTasks returns the number of queued or running task rows.
+func (s *Store) CountActiveTasks(ctx context.Context) (int, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM tasks WHERE status IN ('queued','running')`).Scan(&n)
+	return n, err
+}

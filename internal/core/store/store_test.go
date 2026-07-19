@@ -225,3 +225,20 @@ func TestPruneTasksPerNameBelowThreshold(t *testing.T) {
 		t.Fatalf("below threshold should delete nothing, got %d", deleted)
 	}
 }
+
+func TestCountActiveTasks(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+	_ = st.UpsertTask(ctx, Task{ID: "a", Name: "N", Status: "queued"})
+	_ = st.UpsertTask(ctx, Task{ID: "b", Name: "N", Status: "running"})
+	_ = st.UpsertTask(ctx, Task{ID: "c", Name: "N", Status: "completed"})
+	_ = st.UpsertTask(ctx, Task{ID: "d", Name: "N", Status: "failed"})
+
+	n, err := st.CountActiveTasks(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Fatalf("want 2 active (queued+running), got %d", n)
+	}
+}
