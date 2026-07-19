@@ -244,7 +244,13 @@ func ensureAdmin(ctx context.Context, st *store.Store, log *slog.Logger) error {
 type dlQueueAdapter struct{ svc *downloadclient.Service }
 
 func (a dlQueueAdapter) Queue(ctx context.Context) importing.QueueSnapshot {
-	res := a.svc.Queue(ctx)
+	return toQueueSnapshot(a.svc.Queue(ctx))
+}
+
+// toQueueSnapshot maps a download-client queue read onto importing's view of it.
+// The per-client errors are carried across, not dropped: clearing the queue
+// refuses to run against an incomplete picture.
+func toQueueSnapshot(res downloadclient.QueueResult) importing.QueueSnapshot {
 	out := importing.QueueSnapshot{Items: res.Items}
 	for _, e := range res.ClientErrors {
 		out.ClientErrors = append(out.ClientErrors, importing.ClientError{
