@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -262,5 +263,103 @@ func TestMediaFilesForSeries(t *testing.T) {
 	}
 	if len(files) != 1 || files[0].RelativePath != "Show/Season 01/E01.mkv" {
 		t.Fatalf("want 1 series file, got %+v", files)
+	}
+}
+
+func TestListHistoryPageSlicesAndCountsTotal(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+	for i := 0; i < 5; i++ {
+		if err := st.AddHistory(ctx, HistoryEvent{
+			EventType: "grabbed", MediaKind: "movie",
+			SourceTitle: fmt.Sprintf("Rel.%d", i),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Page 1 of 2: newest first (id DESC), matching ListHistory's ordering.
+	rows, total, err := st.ListHistoryPage(ctx, 0, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 5 {
+		t.Fatalf("total = %d, want 5", total)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("len(rows) = %d, want 2", len(rows))
+	}
+	if rows[0].SourceTitle != "Rel.4" {
+		t.Fatalf("rows[0] = %q, want newest Rel.4", rows[0].SourceTitle)
+	}
+
+	// Offset past the end: empty page, but the real total.
+	rows, total, err = st.ListHistoryPage(ctx, 99, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 0 || total != 5 {
+		t.Fatalf("out-of-range page = %d rows, total %d; want 0 rows, total 5", len(rows), total)
+	}
+
+	// limit <= 0 falls back to the 50 default rather than returning nothing.
+	rows, _, err = st.ListHistoryPage(ctx, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 5 {
+		t.Fatalf("limit=0 returned %d rows, want all 5 via the default", len(rows))
+	}
+}
+
+func TestClearHistoryReturnsCountAndEmptiesTable(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+	for i := 0; i < 3; i++ {
+		if err := st.AddHistory(ctx, HistoryEvent{EventType: "grabbed", MediaKind: "movie"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	n, err := st.ClearHistory(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 3 {
+		t.Fatalf("ClearHistory = %d, want 3", n)
+	}
+	rows, total, err := st.ListHistoryPage(ctx, 0, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 0 || total != 0 {
+		t.Fatalf("after clear: %d rows, total %d; want empty", len(rows), total)
+	}
+	// Clearing an empty table is a no-op, not an error.
+	if n, err := st.ClearHistory(ctx); err != nil || n != 0 {
+		t.Fatalf("second ClearHistory = (%d, %v), want (0, nil)", n, err)
+	}
+}
+
+// Regression guard for spec §3.1: automation.activeQueue depends on ListQueue
+// returning EVERY row. If it is ever paginated, items past the first page look
+// un-queued and get grabbed a second time on the next sweep.
+func TestListQueueReturnsAllRowsUnpaged(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+	for i := 0; i < 60; i++ {
+		if _, err := st.EnqueueGrab(ctx, QueueItem{
+			ClientItemID: fmt.Sprintf("h%d", i), Protocol: "usenet",
+			SourceTitle: fmt.Sprintf("Rel.%d", i), MediaKind: "movie",
+			Status: QueueGrabbed,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rows, err := st.ListQueue(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 60 {
+		t.Fatalf("ListQueue returned %d rows, want all 60 (see spec §3.1)", len(rows))
 	}
 }

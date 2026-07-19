@@ -256,6 +256,50 @@ func (s *Store) ListHistory(ctx context.Context, limit int) ([]HistoryEvent, err
 	return out, rows.Err()
 }
 
+// defaultPageSize is the fallback when a caller passes a non-positive limit.
+const defaultPageSize = 50
+
+// ListHistoryPage returns one page of history newest-first plus the total row
+// count across all pages. Ordering matches ListHistory so paging is stable.
+func (s *Store) ListHistoryPage(ctx context.Context, offset, limit int) ([]HistoryEvent, int, error) {
+	if limit <= 0 {
+		limit = defaultPageSize
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	var total int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM history`).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, event_type, media_kind, series_id, episode_id, movie_id, source_title, quality_id, message, created_at
+		 FROM history ORDER BY id DESC LIMIT ? OFFSET ?`, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	out := []HistoryEvent{}
+	for rows.Next() {
+		var h HistoryEvent
+		if err := rows.Scan(&h.ID, &h.EventType, &h.MediaKind, &h.SeriesID, &h.EpisodeID, &h.MovieID,
+			&h.SourceTitle, &h.QualityID, &h.Message, &h.CreatedAt); err != nil {
+			return nil, 0, err
+		}
+		out = append(out, h)
+	}
+	return out, total, rows.Err()
+}
+
+// ClearHistory deletes every history row, returning how many were removed.
+func (s *Store) ClearHistory(ctx context.Context) (int64, error) {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM history`)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 // MovieFileIDs returns the set of movie ids that currently have a file.
 func (s *Store) MovieFileIDs(ctx context.Context) (map[int64]bool, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT movie_id FROM media_files WHERE movie_id IS NOT NULL`)

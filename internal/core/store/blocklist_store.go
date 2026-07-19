@@ -84,6 +84,46 @@ func (s *Store) ListBlocklist(ctx context.Context) ([]Blocklist, error) {
 	return out, rows.Err()
 }
 
+// ListBlocklistPage returns one page of blocklist entries newest-first plus the
+// total row count across all pages. Ordering matches ListBlocklist.
+func (s *Store) ListBlocklistPage(ctx context.Context, offset, limit int) ([]Blocklist, int, error) {
+	if limit <= 0 {
+		limit = defaultPageSize
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	var total int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM blocklist`).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT `+blocklistCols+` FROM blocklist ORDER BY id DESC LIMIT ? OFFSET ?`, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	out := []Blocklist{}
+	for rows.Next() {
+		bl, err := scanBlocklistRow(rows)
+		if err != nil {
+			return nil, 0, err
+		}
+		out = append(out, bl)
+	}
+	return out, total, rows.Err()
+}
+
+// ClearBlocklist deletes every blocklist row, returning how many were removed.
+// Previously-rejected releases become eligible for grabbing again.
+func (s *Store) ClearBlocklist(ctx context.Context) (int64, error) {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM blocklist`)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 func (s *Store) RemoveBlocklist(ctx context.Context, id int64) error {
 	res, err := s.db.ExecContext(ctx, `DELETE FROM blocklist WHERE id = ?`, id)
 	if err != nil {
