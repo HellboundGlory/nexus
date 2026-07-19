@@ -13,8 +13,18 @@ import (
 
 	"github.com/hellboundg/nexus/internal/core/auth"
 	"github.com/hellboundg/nexus/internal/core/events"
+	"github.com/hellboundg/nexus/internal/core/scheduler"
 	"github.com/hellboundg/nexus/internal/core/store"
 )
+
+// TaskScheduler is the scheduler surface the tasks endpoints need.
+type TaskScheduler interface {
+	Scheduled() []scheduler.ScheduledTask
+	RunNow(name string) (string, error)
+}
+
+// Compile-time assertion that the concrete scheduler satisfies TaskScheduler.
+var _ TaskScheduler = (*scheduler.Scheduler)(nil)
 
 type Deps struct {
 	Auth      *auth.Service
@@ -22,6 +32,7 @@ type Deps struct {
 	Version   string
 	Bus       *events.Bus
 	WSForward []string
+	Tasks     TaskScheduler
 }
 
 type server struct {
@@ -45,6 +56,8 @@ func NewRouter(d Deps, spa http.Handler, mounts ...func(chi.Router)) http.Handle
 		r.Group(func(r chi.Router) {
 			r.Use(d.Auth.Middleware)
 			r.Get("/system/status", s.handleStatus)
+			r.Get("/system/tasks", s.handleTasks)
+			r.Post("/system/tasks/{name}/run", s.handleRunTask)
 			s.registerWebSocket(r)
 			for _, m := range mounts {
 				m(r)

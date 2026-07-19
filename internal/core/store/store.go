@@ -27,13 +27,15 @@ type Session struct {
 }
 
 type Task struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	Status    string    `json:"status"`
-	Progress  int       `json:"progress"`
-	Message   string    `json:"message"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID        string     `json:"id"`
+	Name      string     `json:"name"`
+	Status    string     `json:"status"`
+	Progress  int        `json:"progress"`
+	Message   string     `json:"message"`
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
+	StartedAt *time.Time `json:"started_at"`
+	EndedAt   *time.Time `json:"ended_at"`
 }
 
 // --- settings ---
@@ -127,22 +129,55 @@ func (s *Store) DeleteSession(ctx context.Context, token string) error {
 
 func (s *Store) UpsertTask(ctx context.Context, t Task) error {
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO tasks (id, name, status, progress, message)
-		 VALUES (?, ?, ?, ?, ?)
+		`INSERT INTO tasks (id, name, status, progress, message, started_at, ended_at)
+		 VALUES (?, ?, ?, ?, ?,
+		         CASE WHEN ? = 'running' THEN CURRENT_TIMESTAMP ELSE NULL END,
+		         CASE WHEN ? IN ('completed','failed') THEN CURRENT_TIMESTAMP ELSE NULL END)
 		 ON CONFLICT(id) DO UPDATE SET
 		   status = excluded.status,
 		   progress = excluded.progress,
 		   message = excluded.message,
-		   updated_at = CURRENT_TIMESTAMP`,
-		t.ID, t.Name, t.Status, t.Progress, t.Message)
+		   updated_at = CURRENT_TIMESTAMP,
+		   started_at = CASE WHEN excluded.status = 'running' AND started_at IS NULL
+		                     THEN CURRENT_TIMESTAMP ELSE started_at END,
+		   ended_at   = CASE WHEN excluded.status IN ('completed','failed')
+		                     THEN CURRENT_TIMESTAMP ELSE ended_at END`,
+		t.ID, t.Name, t.Status, t.Progress, t.Message, t.Status, t.Status)
 	return err
 }
 
-func (s *Store) GetTask(ctx context.Context, id string) (*Task, error) {
+func scanTask(sc interface{ Scan(...any) error }) (Task, error) {
 	var t Task
-	err := s.db.QueryRowContext(ctx,
-		`SELECT id, name, status, progress, message, created_at, updated_at FROM tasks WHERE id = ?`, id).
-		Scan(&t.ID, &t.Name, &t.Status, &t.Progress, &t.Message, &t.CreatedAt, &t.UpdatedAt)
+	var sa, ea sql.NullTime
+	if err := sc.Scan(&t.ID, &t.Name, &t.Status, &t.Progress, &t.Message, &t.CreatedAt, &t.UpdatedAt, &sa, &ea); err != nil {
+		return Task{}, err
+	}
+	if sa.Valid {
+		t.StartedAt = &sa.Time
+	}
+	if ea.Valid {
+		t.EndedAt = &ea.Time
+	}
+	return t, nil
+}
+
+func (s *Store) LastTaskByName(ctx context.Context, name string) (*Task, error) {
+	t, err := scanTask(s.db.QueryRowContext(ctx,
+		`SELECT id, name, status, progress, message, created_at, updated_at, started_at, ended_at
+		 FROM tasks WHERE name = ? ORDER BY created_at DESC, rowid DESC LIMIT 1`, name))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &t, nil
+}
+
+func (s *Store) GetTask(ctx context.Context, id string) (*Task, error) {
+	t, err := scanTask(s.db.QueryRowContext(ctx,
+		`SELECT id, name, status, progress, message, created_at, updated_at, started_at, ended_at
+		 FROM tasks WHERE id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -154,7 +189,7 @@ func (s *Store) GetTask(ctx context.Context, id string) (*Task, error) {
 
 func (s *Store) ListTasks(ctx context.Context, limit int) ([]Task, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, name, status, progress, message, created_at, updated_at
+		`SELECT id, name, status, progress, message, created_at, updated_at, started_at, ended_at
 		 FROM tasks ORDER BY created_at DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
@@ -162,8 +197,8 @@ func (s *Store) ListTasks(ctx context.Context, limit int) ([]Task, error) {
 	defer rows.Close()
 	var out []Task
 	for rows.Next() {
-		var t Task
-		if err := rows.Scan(&t.ID, &t.Name, &t.Status, &t.Progress, &t.Message, &t.CreatedAt, &t.UpdatedAt); err != nil {
+		t, err := scanTask(rows)
+		if err != nil {
 			return nil, err
 		}
 		out = append(out, t)

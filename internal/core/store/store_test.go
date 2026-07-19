@@ -86,3 +86,76 @@ func TestTasksUpsert(t *testing.T) {
 		t.Fatalf("bad task: %+v err=%v", got, err)
 	}
 }
+
+func TestTaskTimestampsLifecycle(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+
+	// queued: no started/ended yet
+	if err := st.UpsertTask(ctx, Task{ID: "t1", Name: "Job", Status: "queued"}); err != nil {
+		t.Fatal(err)
+	}
+	q, _ := st.GetTask(ctx, "t1")
+	if q.StartedAt != nil || q.EndedAt != nil {
+		t.Fatalf("queued task should have nil started/ended, got %+v", q)
+	}
+
+	// running: started set, ended still nil
+	if err := st.UpsertTask(ctx, Task{ID: "t1", Name: "Job", Status: "running"}); err != nil {
+		t.Fatal(err)
+	}
+	r, _ := st.GetTask(ctx, "t1")
+	if r.StartedAt == nil || r.EndedAt != nil {
+		t.Fatalf("running task should have started set, ended nil, got %+v", r)
+	}
+
+	// completed: ended set, started preserved
+	if err := st.UpsertTask(ctx, Task{ID: "t1", Name: "Job", Status: "completed", Progress: 100}); err != nil {
+		t.Fatal(err)
+	}
+	c, _ := st.GetTask(ctx, "t1")
+	if c.StartedAt == nil || c.EndedAt == nil {
+		t.Fatalf("completed task should have both timestamps, got %+v", c)
+	}
+	if !c.StartedAt.Equal(*r.StartedAt) {
+		t.Fatal("started_at must be preserved across the terminal transition")
+	}
+}
+
+func TestTaskTimestampsFirstInsertRunning(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+
+	// First-ever UpsertTask for this id goes straight to the INSERT branch
+	// (no prior queued row); status "running" must still derive started_at.
+	if err := st.UpsertTask(ctx, Task{ID: "t1", Name: "Job", Status: "running"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.GetTask(ctx, "t1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.StartedAt == nil {
+		t.Fatal("first-ever running insert should set started_at, got nil")
+	}
+	if got.EndedAt != nil {
+		t.Fatalf("first-ever running insert should leave ended_at nil, got %+v", got.EndedAt)
+	}
+}
+
+func TestLastTaskByName(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+	if got, err := st.LastTaskByName(ctx, "Nope"); err != nil || got != nil {
+		t.Fatalf("want nil,nil for unknown name, got %v,%v", got, err)
+	}
+	_ = st.UpsertTask(ctx, Task{ID: "a", Name: "Job", Status: "completed"})
+	_ = st.UpsertTask(ctx, Task{ID: "b", Name: "Job", Status: "completed"})
+	last, err := st.LastTaskByName(ctx, "Job")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if last == nil || last.Name != "Job" {
+		t.Fatalf("want a Job task, got %+v", last)
+	}
+}

@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { useToast } from "@/lib/toast"
-import { useSystemStatus, useAutomationConfig, useSaveAutomationConfig } from "./configApi"
+import { useAutomationConfig, useSaveAutomationConfig } from "./configApi"
 import type { AutomationConfig } from "./configTypes"
 
 const NUM_FIELDS: { key: keyof AutomationConfig; label: string }[] = [
@@ -18,7 +18,6 @@ const BOOL_FIELDS: { key: keyof AutomationConfig; label: string }[] = [
 
 export function GeneralSection() {
   const { toast } = useToast()
-  const statusQ = useSystemStatus()
   const cfgQ = useAutomationConfig()
   const save = useSaveAutomationConfig()
   const [form, setForm] = useState<AutomationConfig | null>(null)
@@ -27,8 +26,6 @@ export function GeneralSection() {
     setForm(cfgQ.data)
     setInitialized(true)
   }
-
-  const s = statusQ.data
 
   const onSave = () => {
     if (!form) return
@@ -53,20 +50,6 @@ export function GeneralSection() {
   return (
     <div className="p-6">
       <h2 className="mb-4 text-lg font-semibold">General</h2>
-
-      <section className="mb-6 rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)] p-4">
-        <h3 className="mb-2 text-sm font-medium">System Info</h3>
-        {statusQ.isLoading || !s ? (
-          <p className="text-sm text-[var(--color-muted)]">Loading…</p>
-        ) : (
-          <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
-            <dt className="text-[var(--color-muted)]">Version</dt><dd>{s.version}</dd>
-            <dt className="text-[var(--color-muted)]">App</dt><dd>{s.appName}</dd>
-            <dt className="text-[var(--color-muted)]">Healthy</dt><dd>{s.healthy ? "Yes" : "No"}</dd>
-            <dt className="text-[var(--color-muted)]">Active tasks</dt><dd>{s.taskCount}</dd>
-          </dl>
-        )}
-      </section>
 
       <section className="rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)] p-4">
         <h3 className="mb-1 text-sm font-medium">Task Scheduling</h3>
