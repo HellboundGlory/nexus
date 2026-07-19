@@ -10,7 +10,7 @@ The batch was decomposed as:
 
 | Sub-project | Scope | State |
 |---|---|---|
-| **SP-A** (this spec) | Clear + pagination on Queue/History/Blocklist; queue removal also removes from the download client | designing |
+| **SP-A** (this spec) | Clear on all three Activity tabs; pagination on History/Blocklist; queue removal also removes from the download client | designing |
 | SP-B | Sequential per-series grabbing + season-pack exhaustion | not started |
 | SP-C | TMDB id in library folder names + a Radarr/Sonarr-style rename modal | not started, needs screenshots |
 
@@ -21,11 +21,11 @@ user confirmed is the desired behaviour.
 
 ### The problems being solved
 
-1. **Unbounded lists.** All three Activity tabs fetch their whole list and render
-   every row. `useHistory` requests `/history?limit=100`, so history older than the
-   most recent 100 events is *unreachable from the UI entirely*. The user's report
-   ("a massive scroll bar") is the visible half of this; the unreachable-history
-   half is the more serious one.
+1. **Unbounded History and Blocklist.** Both fetch their whole list and render every
+   row. `useHistory` requests `/history?limit=100`, so history older than the most
+   recent 100 events is *unreachable from the UI entirely*. The user's report ("a
+   massive scroll bar") is the visible half of this; the unreachable-history half is
+   the more serious one.
 2. **No bulk clear.** Rows can only be removed one at a time.
 3. **Queue removal is DB-only.** `deleteQueue` (`internal/importing/api.go:114`)
    calls `store.DeleteQueueItem` and nothing else. The download continues in the
@@ -35,15 +35,21 @@ user confirmed is the desired behaviour.
 
 **Goals**
 
-- Server-side pagination on Queue, History and Blocklist.
+- Server-side pagination on History and Blocklist.
 - A Clear button on each of the three tabs.
 - Removing a queue item (singly or via Clear) also cancels the download in the
   download client and deletes its data.
 - Optionally blocklist a release at the moment it is removed from the queue.
+- Refuse to clear the queue when a download client is unreachable, rather than
+  silently orphaning downloads.
 
 **Non-goals**
 
-- Filtering, sorting or searching within the tabs. Pagination only.
+- **Pagination on the Queue tab.** Dropped at the user's direction: the queue is
+  naturally self-limiting (rows are deleted on import) and SP-B will shrink it
+  further by grabbing one item per series at a time. `GET /queue` keeps its current
+  bare-array wire shape.
+- Filtering, sorting or searching within the tabs.
 - Changing what History records, or adding history retention/pruning. (Task-table
   pruning shipped in SP5; history pruning is a separate question, not raised.)
 - Any change to automation's grab behaviour — that is SP-B.
@@ -62,12 +68,12 @@ against grabbing the same item twice — `searchMovie` (`search.go:39`),
 `searchSeason` (`search.go:230`) and `searchEpisode` (`search.go:316`) all consult
 them.
 
-If `ListQueue` were changed to return a page, items beyond the first page would
-look un-queued and be re-grabbed on every sweep.
-
-**Therefore:** pagination is added as a *new* method (`ListQueuePage`). `ListQueue`
-is not touched. The same reasoning applies to `QueueByStatus`, which
-`ImportCompleted` (`internal/importing/command.go:15`) uses to find rows to import.
+Queue pagination is out of scope (§2), so this is not at risk in SP-A — but it is
+recorded here because it is the single most dangerous thing to get wrong in this
+area of the code, and **SP-B will be working directly in it**. If queue pagination
+is ever revisited, it must be added as a new method, never by changing `ListQueue`.
+The same reasoning applies to `QueueByStatus`, which `ImportCompleted`
+(`internal/importing/command.go:15`) uses to find rows to import.
 
 ### 3.2 The live client item id is only reliably known from the live queue
 
@@ -80,9 +86,7 @@ from the live item. This is documented on `matchItem`
 client id from the live item at `importer.go:63` rather than from the row.
 
 **Therefore:** removal resolves the live item via `matchItem` and uses
-`item.DownloadClientID` / `item.ID`. When there is no live match (already
-finished, already removed, client offline) the DB row is still deleted — a missing
-client item must never block the user from clearing their queue.
+`item.DownloadClientID` / `item.ID`.
 
 ### 3.3 Removal without blocklisting invites an immediate re-grab
 
@@ -95,26 +99,40 @@ This is not a bug to fix here; it is why Radarr and Sonarr put a "Blocklist
 release" checkbox on their remove dialogs. SP-A adopts the same escape hatch and
 states the consequence inline in the dialog.
 
+### 3.4 The download-client reachability signal exists but is currently discarded
+
+`downloadclient.Service.Queue` returns `QueueResult{Items, ClientErrors}` with
+explicit partial-success semantics — a client whose `Items()` call fails is
+recorded in `ClientErrors` rather than failing the whole fan-out
+(`internal/downloadclient/downloadclient.go:137-165`).
+
+`importing.QueueReader.Queue` is declared as `Queue(ctx) []provider.DownloadItem`,
+and `dlQueueAdapter` (`cmd/nexus/main.go:245`) satisfies it by returning
+`.Items` and **dropping `ClientErrors` on the floor**. So today the importing layer
+genuinely cannot tell "the client says this download is gone" apart from "the
+client did not answer".
+
+That distinction is precisely what "refuse to clear when unreachable" needs, so
+this flattening must be undone (§4.2). This is the same class of defect, and the
+same fix, as C3's `Searcher` → `SearchDetailed` widening, where an adapter
+collapsed per-indexer errors that the UI needed.
+
 ## 4. Design
 
-### 4.1 Store — paged reads
+### 4.1 Store
 
-Three new methods, each returning the page plus the unfiltered total:
+Paged reads for the two lists that need them:
 
 ```go
-func (s *Store) ListQueuePage(ctx context.Context, offset, limit int) ([]QueueItem, int, error)
 func (s *Store) ListHistoryPage(ctx context.Context, offset, limit int) ([]HistoryEvent, int, error)
 func (s *Store) ListBlocklistPage(ctx context.Context, offset, limit int) ([]Blocklist, int, error)
 ```
 
-Each runs a `SELECT COUNT(*)` and a `SELECT … LIMIT ? OFFSET ?` against its table.
-Ordering matches the existing unpaged methods exactly — `download_queue` by `id`
-ascending, `history` and `blocklist` by `id` descending — so a page boundary is
-stable across the queue's 5-second poll.
+Each runs a `SELECT COUNT(*)` and a `SELECT … LIMIT ? OFFSET ?`. Ordering matches
+the existing unpaged methods exactly — both `id DESC`. `limit <= 0` falls back to
+50; `offset < 0` clamps to 0.
 
-`limit <= 0` falls back to 50; `offset < 0` clamps to 0.
-
-### 4.2 Store — bulk deletes
+Bulk deletes:
 
 ```go
 func (s *Store) ClearHistory(ctx context.Context) (int64, error)
@@ -125,10 +143,48 @@ Both are `DELETE FROM <table>` returning `RowsAffected`. There is deliberately n
 `ClearQueue` store method: clearing the queue is a service-level operation because
 each row needs client-side removal first (§4.4).
 
+### 4.2 Undoing the QueueReader flattening
+
+`importing.QueueReader.Queue` is **changed** (not widened with a second method) to
+carry the client errors:
+
+```go
+// in package importing
+type ClientError struct {
+    ClientID string `json:"clientId"`
+    Message  string `json:"message"`
+}
+
+type QueueSnapshot struct {
+    Items        []provider.DownloadItem
+    ClientErrors []ClientError
+}
+
+type QueueReader interface {
+    Queue(ctx context.Context) QueueSnapshot
+    Remove(ctx context.Context, clientID, itemID string, deleteData bool) error
+}
+```
+
+`dlQueueAdapter.Queue` maps `downloadclient.QueueResult` straight across.
+
+**Why replace rather than add a `QueueDetailed` alongside it** (which is what C3
+did for `Searcher`): C3 had multiple implementers and a widely-used method, so
+additive was the low-risk choice. Here there is exactly one production implementer
+(`dlQueueAdapter`), one test fake (`fakeQueue`,
+`internal/importing/enqueue_test.go:30`), and three call sites (`listQueue`,
+`ImportCompleted`, plus the new clear path). Keeping both would leave a method
+whose only distinguishing feature is that it *loses* the errors — and using it by
+mistake reintroduces exactly the bug being fixed. The compiler catches every call
+site, so the blast radius is fully enumerable.
+
+Existing callers that do not care about errors read `.Items` and are otherwise
+unchanged.
+
 ### 4.3 API — paged list endpoints
 
-`GET /queue`, `GET /history` and `GET /blocklist` accept `?page=` (1-based) and
-`?pageSize=`, and return an envelope:
+`GET /history` and `GET /blocklist` accept `?page=` (1-based) and `?pageSize=`,
+and return an envelope:
 
 ```json
 { "items": [ … ], "page": 1, "pageSize": 50, "total": 1234 }
@@ -138,28 +194,42 @@ each row needs client-side removal first (§4.4).
 clamps to `>= 1`. A page past the end returns an empty `items` array with the
 correct `total`, so the UI can recover by clamping to the last page.
 
-**This is a breaking wire change** — all three endpoints currently return a bare
-array. The only consumers are the three FE sections in `web/src/features/activity/`,
-all updated in the same change. `GET /history`'s existing `?limit=` is dropped in
-favour of `pageSize`; nothing outside the FE uses it.
+**This is a breaking wire change for these two endpoints** — both currently return
+a bare array. The only consumers are `HistorySection` and `BlocklistSection` in
+`web/src/features/activity/`, updated in the same change. `GET /history`'s existing
+`?limit=` is dropped in favour of `pageSize`.
 
-`GET /queue` keeps enriching each row with live `progress` / `downloadStatus` via
-`matchItem`, exactly as today — enrichment now applies to the page's rows only.
+`GET /queue` is **unchanged** — still a bare array, still enriched per row with
+live `progress` / `downloadStatus` via `matchItem`.
 
 ### 4.4 API — clear endpoints
 
-- `DELETE /queue` → `{ "removed": N }`. Iterates every row: resolve the live item
-  via `matchItem`, and when matched call `queue.Remove(clientID, itemID, true)` —
-  `deleteData: true`, so partial files go too. Client-removal errors are
-  `slog.Warn`-ed and never abort the sweep. Then `store.DeleteQueueItem` per row,
-  emitting `QueueUpdated{ID: row.ID}` per removed row — the same per-row emission
-  `ImportItem` makes (`internal/importing/importer.go:67`), so the WS-driven UI
-  refresh path stays uniform rather than needing a new bulk event type.
-- `DELETE /history` → `{ "removed": N }` via `store.ClearHistory`.
-- `DELETE /blocklist` → `{ "removed": N }` via `store.ClearBlocklist`.
+**`DELETE /queue` → `{ "removed": N }`, or 503 and no deletions.**
 
-Clearing the blocklist makes previously-rejected releases eligible again; that is
-the point of the button, and the confirm dialog says so.
+Preflight: call `queue.Queue(ctx)` once. If `len(ClientErrors) > 0`, refuse
+immediately with 503 `client_unavailable` and a message naming the failing clients
+— **nothing is deleted**. This is the user-chosen behaviour: better to block the
+clear than to orphan downloads that Nexus can no longer see.
+
+Otherwise, for each row: resolve the live item from the snapshot via `matchItem`;
+when matched call `queue.Remove(clientID, itemID, true)` (`deleteData: true`, so
+partial files go too). A row with no live match is a download the client has
+already finished with — its row is simply deleted. Then `store.DeleteQueueItem`
+per row, emitting `QueueUpdated{ID: row.ID}` per removed row — the same per-row
+emission `ImportItem` makes (`internal/importing/importer.go:67`), so the WS-driven
+UI refresh path stays uniform rather than needing a new bulk event type.
+
+A `Remove` call that fails *after* the preflight passed (a client that dropped
+mid-sweep) aborts the loop and returns 503; rows already removed stay removed.
+This is a genuinely partial outcome, but every row it removed was removed
+correctly from both sides, and re-pressing Clear resumes from where it stopped.
+
+**`DELETE /history` → `{ "removed": N }`** via `store.ClearHistory`.
+**`DELETE /blocklist` → `{ "removed": N }`** via `store.ClearBlocklist`.
+
+Neither touches a download client, so neither can fail this way. Clearing the
+blocklist makes previously-rejected releases eligible again; that is the point of
+the button, and the confirm dialog says so.
 
 ### 4.5 API — single queue-item removal
 
@@ -170,14 +240,23 @@ the point of the button, and the confirm dialog says so.
 | `removeFromClient` | `true` | Resolve the live item and `Remove(…, deleteData: true)` before deleting the row |
 | `blocklist` | `false` | `store.AddBlocklist` the release, scoped to its movie/series, before deleting the row |
 
-Defaults are chosen so that the plain `DELETE /queue/{id}` a future client might
-send does the *safe, expected* thing (no orphaned download). The blocklist entry
-mirrors the shape `handleFailed` writes (`internal/importing/command.go:51-56`),
-with `Reason: "removed from queue"`.
+Defaults are chosen so that a plain `DELETE /queue/{id}` does the safe, expected
+thing (no orphaned download).
 
-This moves the handler's logic out of the API layer into a new
-`Service.RemoveQueueItem(ctx, id, opts)` so it is testable without HTTP and so
-`DELETE /queue` can reuse it.
+Consistent with §4.4: when `removeFromClient` is true and the client call fails,
+the request returns 503 and **the row is not deleted**. The escape hatch is
+unchecking "Remove from download client", which deletes the row unconditionally —
+so the user is never trapped with an undeletable row, but has to opt into
+orphaning it.
+
+A row with no live match is not a failure — the client has nothing to remove, so
+the row is deleted.
+
+The blocklist entry mirrors the shape `handleFailed` writes
+(`internal/importing/command.go:51-56`), with `Reason: "removed from queue"`.
+
+This logic moves out of the API layer into `Service.RemoveQueueItem(ctx, id, opts)`
+so it is testable without HTTP and so `DELETE /queue` can reuse it.
 
 ### 4.6 Frontend
 
@@ -189,20 +268,20 @@ New shared component `web/src/components/ui/Pagination.tsx`:
 ```
 
 Renders `Showing X–Y of Z`, Previous/Next buttons (disabled at the ends), and a
-page-size `<select>` offering 25 / 50 / 100. It is presentational — page state
-lives in each section via `useState`.
+page-size `<select>` offering 25 / 50 / 100. Presentational — page state lives in
+each section via `useState`. Used by `HistorySection` and `BlocklistSection` only.
 
 `activity/api.ts` changes:
 
-- `useQueue(page, pageSize)`, `useHistory(page, pageSize)`, `useBlocklist(page, pageSize)`
-  take page state, include it in their query keys, and unwrap the envelope.
-- New `useClearQueue()`, `useClearHistory()`, `useClearBlocklist()` mutations,
-  each invalidating its own key (plus `queue` → also `history`, since clearing the
-  queue does not write history but importing does and the two views sit together).
+- `useHistory(page, pageSize)` and `useBlocklist(page, pageSize)` take page state,
+  include it in their query keys, and unwrap the envelope. `useQueue()` is
+  unchanged.
+- New `useClearQueue()`, `useClearHistory()`, `useClearBlocklist()` mutations, each
+  invalidating its own key.
 - `useRemoveQueueItem()` takes `{ id, removeFromClient, blocklist }`.
 
-`QueueSection` replaces its `window.confirm` with a new
-`RemoveQueueItemDialog` — same construction as `DeleteConfirmDialog`
+`QueueSection` replaces its `window.confirm` with a new `RemoveQueueItemDialog` —
+same construction as `DeleteConfirmDialog`
 (`web/src/features/library/DeleteConfirmDialog.tsx`), two checkboxes:
 
 - **Remove from download client** (default **on**) — "Also cancel the download and
@@ -211,62 +290,78 @@ lives in each section via `useState`.
   Without this, automation may re-grab the same file."
 
 Each section gains a Clear button in a small header row above its table, behind a
-confirm dialog naming the row count (e.g. "Clear all 1,234 history events?").
-The Clear button is hidden when `total === 0`.
+confirm dialog naming the row count (e.g. "Clear all 1,234 history events?"). The
+Clear button is hidden when there is nothing to clear.
+
+A 503 from either queue endpoint surfaces as an error toast carrying the server's
+message (which names the unreachable client), via the existing `ApiError` handling
+already used in `QueueSection`.
 
 `useActivityInvalidation` is unchanged — it already invalidates all three keys, and
 query keys that now include page state still match by prefix.
 
-### 4.7 Error handling
+### 4.7 Error handling summary
 
-- Paged reads: a store error → 500, as today.
-- Clear queue: per-row client-removal failure is logged and skipped; a DB delete
-  failure aborts and returns 500 with however many were already removed
-  uncounted. Partial clears are acceptable and self-healing — the user can press
-  Clear again.
-- Single removal: `store.ErrNotFound` → 404 (existing behaviour preserved);
-  blocklist-insert failure aborts before the row is deleted, so the user can retry
-  without having lost the row.
+| Situation | Outcome |
+|---|---|
+| Store error on a paged read | 500, as today |
+| `DELETE /queue` with any client unreachable | 503, nothing deleted |
+| Client drops mid-clear | 503; rows already removed stay removed |
+| `DELETE /queue/{id}`, client call fails, `removeFromClient=true` | 503, row kept |
+| `DELETE /queue/{id}`, `removeFromClient=false` | Row deleted unconditionally |
+| Row has no live client match | Not an error; row deleted |
+| `store.ErrNotFound` on single removal | 404 (existing behaviour preserved) |
+| Blocklist insert fails | Abort before deleting the row, so a retry loses nothing |
 
 ## 5. Testing
 
 **Go**
 
-- `ListQueuePage` / `ListHistoryPage` / `ListBlocklistPage`: correct slice, correct
-  total, stable ordering, out-of-range offset → empty page with real total,
-  `limit <= 0` → default.
-- `ListQueue` still returns every row after the paged methods land — a direct
-  regression test for §3.1.
-- `ClearHistory` / `ClearBlocklist` return the right count; clearing an empty table
-  returns 0, not an error.
-- `RemoveQueueItem`: removes from client when `removeFromClient`, does not when
-  not; deletes the row either way; writes a blocklist row when `blocklist`; row is
-  still deleted when the client removal errors; no live match → row deleted, no
-  client call. The existing `fakeQueue` (`internal/importing/enqueue_test.go:30`)
-  already records `Remove` calls.
+- `ListHistoryPage` / `ListBlocklistPage`: correct slice, correct total, stable
+  ordering, out-of-range offset → empty page with real total, `limit <= 0` → default.
+- `ClearHistory` / `ClearBlocklist`: right count; clearing an empty table returns 0,
+  not an error.
+- `ListQueue` still returns every row (regression guard for §3.1, cheap to keep).
+- `QueueSnapshot` plumbing: a fake whose snapshot carries `ClientErrors` makes
+  `DELETE /queue` return 503 and leaves **every** row present — the central test for
+  the user's chosen behaviour.
+- `ClearQueue` happy path: removes from client with `deleteData: true`, empties the
+  table, returns the count.
+- `ClearQueue` where a row has no live match: row deleted, no `Remove` call.
+- `RemoveQueueItem`: removes from client when `removeFromClient`, does not when not;
+  writes a blocklist row when `blocklist`; **row kept** when the client call fails
+  with `removeFromClient=true`; row deleted when the client call fails but
+  `removeFromClient=false`.
 - API: envelope shape asserted via `json.RawMessage` (page/pageSize/total present
-  and numeric, `items` an array); `pageSize` clamping; `DELETE /queue` returns the
-  count and empties the table.
+  and numeric, `items` an array); `pageSize` clamping; `GET /queue` still a bare
+  array (guards against accidentally enveloping it).
+
+The existing `fakeQueue` (`internal/importing/enqueue_test.go:30`) already records
+`Remove` calls; it needs its `Queue` method updated to the new signature and a
+settable `ClientErrors` field.
 
 **Frontend (vitest)**
 
-- `Pagination`: disabled Previous on page 1, disabled Next on the last page,
-  correct `Showing X–Y of Z`, page-size change fires the callback.
-- Each section: renders a page, Clear button hidden at `total === 0`, Clear fires
-  the mutation after confirmation.
+- `Pagination`: disabled Previous on page 1, disabled Next on the last page, correct
+  `Showing X–Y of Z`, page-size change fires the callback.
+- History/Blocklist sections: render a page, Clear hidden when empty, Clear fires
+  the mutation after confirmation, page change refetches.
 - `RemoveQueueItemDialog`: defaults (client on, blocklist off), resets on reopen,
   passes both flags to `onConfirm`.
 - `useRemoveQueueItem` builds the right query string for each flag combination.
+- A 503 clear surfaces an error toast rather than silently doing nothing.
 
 ## 6. Risks
 
 | Risk | Mitigation |
 |---|---|
-| Paginating the wrong method breaks automation's duplicate-grab guard (§3.1) | New methods only; explicit regression test that `ListQueue` is unpaged |
-| Wire-shape change breaks a consumer | Only the three FE sections consume these endpoints; all updated together; verified by grep for the endpoint strings |
-| Clear queue leaves client downloads running when the client is offline | Rows are deleted regardless (§3.2); failures logged. User can re-clear once the client is back — but the already-deleted rows will not retry, so this is a genuine gap, accepted as the alternative (blocking clear on client health) is worse |
+| Changing `QueueReader.Queue`'s signature misses a call site | Compiler-enforced; three call sites and two implementers, all in-repo and enumerated in §4.2 |
+| Wire-shape change breaks a consumer | Only `HistorySection`/`BlocklistSection` consume the two changed endpoints; `GET /queue` deliberately left alone; verified by grep for the endpoint strings |
+| Refusing to clear leaves the user stuck when a client is permanently gone (e.g. deleted from config) | `route`/`Remove` return `ErrClientUnavailable` for an unknown-or-disabled client, so a removed client blocks the clear. Escape hatch: per-row removal with **Remove from download client** unchecked. Accepted; if it proves annoying in practice, a "force" flag on `DELETE /queue` is the natural follow-up |
 | Remove-without-blocklist causes an immediate re-grab | Checkbox plus inline explanation (§3.3) |
+| Partial clear on a mid-sweep client drop | Every row removed was removed correctly from both sides; re-pressing Clear resumes (§4.4) |
 
 ## 7. Open questions
 
-None. Design approved by the user 2026-07-19.
+None. Design and both amendments (no queue pagination; refuse-to-clear on
+unreachable client) approved by the user 2026-07-19.
