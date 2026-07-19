@@ -15,6 +15,8 @@ import { RootFoldersSection } from "@/features/settings/RootFoldersSection"
 import { NamingSection } from "@/features/settings/NamingSection"
 import { MediaManagementSection } from "@/features/settings/MediaManagementSection"
 import { GeneralSection } from "@/features/settings/GeneralSection"
+import { SystemLayout } from "@/features/system/SystemLayout"
+import { StatusSection } from "@/features/system/StatusSection"
 import { ActivityLayout } from "@/features/activity/ActivityLayout"
 import { QueueSection } from "@/features/activity/QueueSection"
 import { HistorySection } from "@/features/activity/HistorySection"
@@ -61,7 +63,15 @@ export const router = createBrowserRouter([
           { path: "general", element: <GeneralSection /> },
         ],
       },
-      { path: "system", element: <Placeholder title="System" /> },
+      {
+        path: "system",
+        element: <SystemLayout />,
+        children: [
+          { index: true, element: <Navigate to="/system/status" replace /> },
+          { path: "status", element: <StatusSection /> },
+          { path: "tasks", element: <Placeholder title="Tasks" /> },
+        ],
+      },
     ],
   },
 ])

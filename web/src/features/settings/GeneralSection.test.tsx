@@ -7,7 +7,7 @@ import * as api from "./configApi"
 
 vi.mock("./configApi", async (orig) => {
   const actual = await orig<typeof import("./configApi")>()
-  return { ...actual, useSystemStatus: vi.fn(), useAutomationConfig: vi.fn(), useSaveAutomationConfig: vi.fn() }
+  return { ...actual, useAutomationConfig: vi.fn(), useSaveAutomationConfig: vi.fn() }
 })
 beforeEach(() => vi.clearAllMocks())
 
@@ -23,19 +23,12 @@ function mut(extra: object = {}) {
 }
 
 function setup(save = vi.fn()) {
-  vi.mocked(api.useSystemStatus).mockReturnValue({ data: { version: "1.2.3", appName: "Nexus", healthy: true, taskCount: 4 }, isLoading: false } as never)
   vi.mocked(api.useAutomationConfig).mockReturnValue({ data: cfg, isLoading: false, isError: false } as never)
   vi.mocked(api.useSaveAutomationConfig).mockReturnValue(mut({ mutate: save }))
   render(<ToastProvider><GeneralSection /></ToastProvider>)
 }
 
 describe("GeneralSection", () => {
-  it("shows system info", () => {
-    setup()
-    expect(screen.getByText("1.2.3")).toBeInTheDocument()
-    expect(screen.getByText("4")).toBeInTheDocument()
-  })
-
   it("shows the restart caveat", () => {
     setup()
     expect(screen.getByText(/next.*restart/i)).toBeInTheDocument()
@@ -76,7 +69,6 @@ describe("GeneralSection", () => {
     // server returns the defaulted config (interval 6), not the typed-in 0.
     const save = vi.fn((_payload, opts) => opts.onSuccess())
     const refetch = vi.fn().mockResolvedValue({ data: cfg })
-    vi.mocked(api.useSystemStatus).mockReturnValue({ data: { version: "1.2.3", appName: "Nexus", healthy: true, taskCount: 4 }, isLoading: false } as never)
     vi.mocked(api.useAutomationConfig).mockReturnValue({ data: cfg, isLoading: false, isError: false, refetch } as never)
     vi.mocked(api.useSaveAutomationConfig).mockReturnValue(mut({ mutate: save }))
     render(<ToastProvider><GeneralSection /></ToastProvider>)
