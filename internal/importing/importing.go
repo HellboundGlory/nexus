@@ -23,10 +23,26 @@ type Grabber interface {
 	Grab(ctx context.Context, req provider.DownloadRequest, clientID string) (string, error)
 }
 
+// ClientError reports one download client that could not be reached during a
+// queue read. Mirrors downloadclient.ClientError without importing that package.
+type ClientError struct {
+	ClientID string `json:"clientId"`
+	Message  string `json:"message"`
+}
+
+// QueueSnapshot is one read of the aggregated download-client queue. Items and
+// ClientErrors are both partial: a client that failed contributes an entry to
+// ClientErrors and no items. Callers that only need the items read .Items;
+// callers that must not act on an incomplete picture check .ClientErrors.
+type QueueSnapshot struct {
+	Items        []provider.DownloadItem
+	ClientErrors []ClientError
+}
+
 // QueueReader reads the aggregated download-client queue and removes items.
 // Satisfied by a thin adapter over downloadclient.Service at the composition root.
 type QueueReader interface {
-	Queue(ctx context.Context) []provider.DownloadItem
+	Queue(ctx context.Context) QueueSnapshot
 	Remove(ctx context.Context, clientID, itemID string, deleteData bool) error
 }
 

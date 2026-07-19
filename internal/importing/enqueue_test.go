@@ -23,14 +23,22 @@ func (f *fakeGrabber) Grab(_ context.Context, req provider.DownloadRequest, _ st
 }
 
 type fakeQueue struct {
-	items   []provider.DownloadItem
-	removed map[string]bool
+	items        []provider.DownloadItem
+	clientErrors []ClientError
+	removed      map[string]bool
+	removeErr    error // when non-nil, every Remove call fails with it
 }
 
-func (f *fakeQueue) Queue(context.Context) []provider.DownloadItem { return f.items }
+func (f *fakeQueue) Queue(context.Context) QueueSnapshot {
+	return QueueSnapshot{Items: f.items, ClientErrors: f.clientErrors}
+}
+
 func (f *fakeQueue) Remove(_ context.Context, _, itemID string, _ bool) error {
 	if f.removed == nil {
 		f.removed = map[string]bool{}
+	}
+	if f.removeErr != nil {
+		return f.removeErr
 	}
 	f.removed[itemID] = true
 	return nil

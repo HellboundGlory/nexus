@@ -19,7 +19,7 @@ func (s *Service) ImportCompleted(ctx context.Context) error {
 	if len(rows) == 0 {
 		return nil
 	}
-	items := s.queue.Queue(ctx)
+	items := s.queue.Queue(ctx).Items
 	for _, row := range rows {
 		it, ok := matchItem(items, row)
 		if !ok {

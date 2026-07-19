@@ -57,7 +57,7 @@ func (a *API) listQueue(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusInternalServerError, "internal", "failed to list queue")
 		return
 	}
-	live := a.svc.queue.Queue(r.Context())
+	live := a.svc.queue.Queue(r.Context()).Items
 	out := make([]queueItemDTO, 0, len(rows))
 	for _, row := range rows {
 		dto := queueItemDTO{QueueItem: row}
