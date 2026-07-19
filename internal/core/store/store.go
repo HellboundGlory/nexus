@@ -211,6 +211,9 @@ func (s *Store) ListTasks(ctx context.Context, limit int) ([]Task, error) {
 // the number of rows removed. Per-name retention keeps every task's most recent
 // terminal row so the Scheduled table's Last Execution never goes blank.
 func (s *Store) PruneTasksPerName(ctx context.Context, keep int) (int64, error) {
+	if keep <= 0 {
+		return 0, nil
+	}
 	res, err := s.db.ExecContext(ctx,
 		`DELETE FROM tasks
 		 WHERE status IN ('completed','failed')

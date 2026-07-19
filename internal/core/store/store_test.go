@@ -226,6 +226,25 @@ func TestPruneTasksPerNameBelowThreshold(t *testing.T) {
 	}
 }
 
+func TestPruneTasksPerNameNonPositiveKeepIsNoop(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+	for i := 0; i < 3; i++ {
+		_ = st.UpsertTask(ctx, Task{ID: fmt.Sprintf("z%d", i), Name: "Z", Status: "completed"})
+	}
+	deleted, err := st.PruneTasksPerName(ctx, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deleted != 0 {
+		t.Fatalf("keep<=0 must be a no-op, got %d deleted", deleted)
+	}
+	rows, _ := st.ListTasks(ctx, 100)
+	if len(rows) != 3 {
+		t.Fatalf("no rows should be deleted, got %d remaining", len(rows))
+	}
+}
+
 func TestCountActiveTasks(t *testing.T) {
 	st := newTestStore(t)
 	ctx := context.Background()
