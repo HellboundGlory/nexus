@@ -2,6 +2,7 @@ package importing
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"strconv"
 	"testing"
@@ -56,6 +57,16 @@ func newSvc(t *testing.T) (*Service, *store.Store) {
 
 func newTestStore(t *testing.T) *store.Store {
 	t.Helper()
+	st, _ := newTestStoreWithDB(t)
+	return st
+}
+
+// newTestStoreWithDB is like newTestStore but also returns the underlying
+// *sql.DB, so a test can reach past the store.Store wrapper to manipulate the
+// schema directly (e.g. dropping a table to force a genuine SQL error out of
+// a store method that would otherwise never fail in a test DB).
+func newTestStoreWithDB(t *testing.T) (*store.Store, *sql.DB) {
+	t.Helper()
 	db, err := database.Open(t.TempDir() + "/t.db")
 	if err != nil {
 		t.Fatal(err)
@@ -64,13 +75,21 @@ func newTestStore(t *testing.T) *store.Store {
 	if err := database.Migrate(db); err != nil {
 		t.Fatal(err)
 	}
-	return store.New(db)
+	return store.New(db), db
 }
 
 func newSvcWithQueue(t *testing.T, q QueueReader) (*Service, *store.Store) {
 	t.Helper()
-	st := newTestStore(t)
-	return NewService(st, &fakeGrabber{returnID: "h1"}, q, nil), st
+	svc, st, _ := newSvcWithQueueAndDB(t, q)
+	return svc, st
+}
+
+// newSvcWithQueueAndDB is like newSvcWithQueue but also returns the
+// underlying *sql.DB for tests that need to break the schema directly.
+func newSvcWithQueueAndDB(t *testing.T, q QueueReader) (*Service, *store.Store, *sql.DB) {
+	t.Helper()
+	st, db := newTestStoreWithDB(t)
+	return NewService(st, &fakeGrabber{returnID: "h1"}, q, nil), st, db
 }
 
 func itoa(v int64) string { return strconv.FormatInt(v, 10) }

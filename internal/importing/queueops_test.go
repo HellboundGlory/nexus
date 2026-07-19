@@ -152,6 +152,37 @@ func TestRemoveQueueItemBlocklistsWhenRequested(t *testing.T) {
 	}
 }
 
+// Spec §4.5: if the blocklist insert fails, RemoveQueueItem must abort BEFORE
+// deleting the queue row, so a retry loses nothing. We force a genuine SQL
+// error out of AddBlocklist by dropping the blocklist table directly through
+// the retained *sql.DB — download_queue and blocklist share identical FK
+// shapes, so a same-value insert can't FK-fail on its own; breaking the table
+// itself is the only way to get AddBlocklist to fail here.
+func TestRemoveQueueItemKeepsRowWhenBlocklistInsertFails(t *testing.T) {
+	q := &fakeQueue{}
+	svc, st, db := newSvcWithQueueAndDB(t, q)
+	row := seedQueueRow(t, st, "h1", "Dune.2021-GRP")
+
+	if _, err := db.Exec(`DROP TABLE blocklist`); err != nil {
+		t.Fatalf("failed to break blocklist table: %v", err)
+	}
+
+	// RemoveFromClient: false isolates the blocklist path from client
+	// behaviour entirely, so this test can only be exercising the ordering
+	// guarantee between AddBlocklist and DeleteQueueItem.
+	err := svc.RemoveQueueItem(context.Background(), row.ID, RemoveOptions{RemoveFromClient: false, Blocklist: true})
+	if err == nil {
+		t.Fatal("expected an error from the broken blocklist insert")
+	}
+
+	// This is the actual guarantee under test: the queue row surviving means
+	// a user whose blocklist write failed can retry the removal without
+	// having lost the queue entry — nothing is orphaned by a partial failure.
+	if _, err := st.GetQueueItem(context.Background(), row.ID); err != nil {
+		t.Fatalf("row must be KEPT when the blocklist insert fails, got GetQueueItem err = %v", err)
+	}
+}
+
 func TestRemoveQueueItemUnknownIDIsNotFound(t *testing.T) {
 	svc, _ := newSvc(t)
 	err := svc.RemoveQueueItem(context.Background(), 4242, RemoveOptions{})
@@ -280,10 +311,13 @@ func TestClearQueueWithoutForceAbortsOnRemoveError(t *testing.T) {
 		removeErr: errors.New("connection refused"),
 	}
 	svc, st := newSvcWithQueue(t, q)
-	seedQueueRow(t, st, "h1", "A-GRP")
+	row := seedQueueRow(t, st, "h1", "A-GRP")
 
 	_, err := svc.ClearQueue(context.Background(), false)
 	if !errors.Is(err, ErrClientUnavailable) {
 		t.Fatalf("err = %v, want ErrClientUnavailable", err)
+	}
+	if _, err := st.GetQueueItem(context.Background(), row.ID); err != nil {
+		t.Fatalf("row must be KEPT when a non-forced clear aborts mid-sweep, got GetQueueItem err = %v", err)
 	}
 }
