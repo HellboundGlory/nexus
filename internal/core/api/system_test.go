@@ -19,7 +19,11 @@ import (
 type fakeTasks struct{ ran string }
 
 func (f *fakeTasks) Scheduled() []scheduler.ScheduledTask {
-	return []scheduler.ScheduledTask{{Name: "Job", Interval: 5 * time.Second, NextRun: time.Now().Add(time.Minute)}}
+	return []scheduler.ScheduledTask{
+		{Name: "Job", Interval: 5 * time.Second, NextRun: time.Now().Add(time.Minute)},
+		// no task rows exist for this name -> exercises the null-emission branch
+		{Name: "NeverRun", Interval: 10 * time.Second, NextRun: time.Now().Add(2 * time.Minute)},
+	}
 }
 func (f *fakeTasks) RunNow(name string) (string, error) {
 	if name != "Job" {
@@ -59,6 +63,9 @@ func TestGetSystemTasks(t *testing.T) {
 	// a completed run of "Job" so lastExecution is populated
 	_ = st.UpsertTask(ctx, store.Task{ID: "j1", Name: "Job", Status: "running"})
 	_ = st.UpsertTask(ctx, store.Task{ID: "j1", Name: "Job", Status: "completed", Progress: 100})
+	// a queue row that was inserted but never transitioned to running/completed,
+	// so started_at/ended_at stay NULL -> exercises the queue-row null branch
+	_ = st.UpsertTask(ctx, store.Task{ID: "q1", Name: "Job", Status: "queued"})
 
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, keyed(http.MethodGet, "/api/v1/system/tasks"))
@@ -72,15 +79,72 @@ func TestGetSystemTasks(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if len(body.Scheduled) != 1 {
-		t.Fatalf("want 1 scheduled, got %d", len(body.Scheduled))
+	if len(body.Scheduled) != 2 {
+		t.Fatalf("want 2 scheduled, got %d", len(body.Scheduled))
 	}
-	// a never-run scheduled task would have null lastExecution; this one ran, so non-null
-	if string(body.Scheduled[0]["lastExecution"]) == "null" {
+
+	var job, neverRun map[string]json.RawMessage
+	for _, sc := range body.Scheduled {
+		var name string
+		if err := json.Unmarshal(sc["name"], &name); err != nil {
+			t.Fatal(err)
+		}
+		switch name {
+		case "Job":
+			job = sc
+		case "NeverRun":
+			neverRun = sc
+		}
+	}
+	if job == nil {
+		t.Fatal("missing \"Job\" scheduled entry")
+	}
+	if neverRun == nil {
+		t.Fatal("missing \"NeverRun\" scheduled entry")
+	}
+	// this one ran, so non-null
+	if string(job["lastExecution"]) == "null" {
 		t.Fatal("lastExecution should be populated for a run task")
 	}
-	if len(body.Queue) != 1 {
-		t.Fatalf("want 1 queue row, got %d", len(body.Queue))
+	// a never-run scheduled task has no task rows -> null, never 0
+	if string(neverRun["lastExecution"]) != "null" {
+		t.Fatalf("NeverRun lastExecution should be null, got %s", neverRun["lastExecution"])
+	}
+	if string(neverRun["lastDurationSeconds"]) != "null" {
+		t.Fatalf("NeverRun lastDurationSeconds should be null, got %s", neverRun["lastDurationSeconds"])
+	}
+
+	if len(body.Queue) != 2 {
+		t.Fatalf("want 2 queue rows, got %d", len(body.Queue))
+	}
+	var completedRow, queuedRow map[string]json.RawMessage
+	for _, q := range body.Queue {
+		var id string
+		if err := json.Unmarshal(q["id"], &id); err != nil {
+			t.Fatal(err)
+		}
+		switch id {
+		case "j1":
+			completedRow = q
+		case "q1":
+			queuedRow = q
+		}
+	}
+	if completedRow == nil {
+		t.Fatal("missing \"j1\" queue row")
+	}
+	if queuedRow == nil {
+		t.Fatal("missing \"q1\" queue row")
+	}
+	// never-started queue row -> started_at/ended_at/durationSeconds null, never 0
+	if string(queuedRow["startedAt"]) != "null" {
+		t.Fatalf("queued row startedAt should be null, got %s", queuedRow["startedAt"])
+	}
+	if string(queuedRow["endedAt"]) != "null" {
+		t.Fatalf("queued row endedAt should be null, got %s", queuedRow["endedAt"])
+	}
+	if string(queuedRow["durationSeconds"]) != "null" {
+		t.Fatalf("queued row durationSeconds should be null, got %s", queuedRow["durationSeconds"])
 	}
 }
 
