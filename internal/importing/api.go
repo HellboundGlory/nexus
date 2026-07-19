@@ -22,12 +22,17 @@ func (a *API) Mount(r chi.Router) {
 	r.Route("/queue", func(r chi.Router) {
 		r.Get("/", a.listQueue)
 		r.Post("/", a.enqueue)
+		r.Delete("/", a.clearQueue)
 		r.Delete("/{id}", a.deleteQueue)
 		r.Post("/{id}/import", a.importItem)
 	})
-	r.Get("/history", a.history)
+	r.Route("/history", func(r chi.Router) {
+		r.Get("/", a.history)
+		r.Delete("/", a.clearHistory)
+	})
 	r.Route("/blocklist", func(r chi.Router) {
 		r.Get("/", a.listBlocklist)
+		r.Delete("/", a.clearBlocklist)
 		r.Delete("/{id}", a.removeBlocklist)
 	})
 	r.Route("/config/naming", func(r chi.Router) {
@@ -43,6 +48,50 @@ func idParam(w http.ResponseWriter, r *http.Request) (int64, bool) {
 		return 0, false
 	}
 	return id, true
+}
+
+const (
+	defaultPageSize = 50
+	maxPageSize     = 100
+)
+
+// pageParams reads 1-based ?page= and ?pageSize=, clamping both into range, and
+// returns the page, the size, and the corresponding SQL offset.
+func pageParams(r *http.Request) (page, size, offset int) {
+	page, _ = strconv.Atoi(r.URL.Query().Get("page"))
+	if page < 1 {
+		page = 1
+	}
+	size, _ = strconv.Atoi(r.URL.Query().Get("pageSize"))
+	if size < 1 {
+		size = defaultPageSize
+	}
+	if size > maxPageSize {
+		size = maxPageSize
+	}
+	return page, size, (page - 1) * size
+}
+
+// pagedResponse is the envelope for the paged list endpoints. Items is always a
+// JSON array, never null.
+type pagedResponse struct {
+	Items    any `json:"items"`
+	Page     int `json:"page"`
+	PageSize int `json:"pageSize"`
+	Total    int `json:"total"`
+}
+
+// boolParam reads a query flag, returning def when absent or unparseable.
+func boolParam(r *http.Request, name string, def bool) bool {
+	raw := r.URL.Query().Get(name)
+	if raw == "" {
+		return def
+	}
+	v, err := strconv.ParseBool(raw)
+	if err != nil {
+		return def
+	}
+	return v
 }
 
 type queueItemDTO struct {
@@ -111,11 +160,45 @@ func (a *API) deleteQueue(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := a.svc.store.DeleteQueueItem(r.Context(), id); err != nil {
+	// removeFromClient defaults to true so a bare DELETE does the safe thing
+	// (no orphaned download); unchecking it is the escape hatch when the client
+	// is unreachable.
+	opts := RemoveOptions{
+		RemoveFromClient: boolParam(r, "removeFromClient", true),
+		Blocklist:        boolParam(r, "blocklist", false),
+	}
+	if err := a.svc.RemoveQueueItem(r.Context(), id, opts); err != nil {
 		a.writeErr(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (a *API) clearQueue(w http.ResponseWriter, r *http.Request) {
+	res, err := a.svc.ClearQueue(r.Context(), boolParam(r, "force", false))
+	if err != nil {
+		a.writeErr(w, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, res)
+}
+
+func (a *API) clearHistory(w http.ResponseWriter, r *http.Request) {
+	n, err := a.svc.store.ClearHistory(r.Context())
+	if err != nil {
+		api.WriteError(w, http.StatusInternalServerError, "internal", "failed to clear history")
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, map[string]int64{"removed": n})
+}
+
+func (a *API) clearBlocklist(w http.ResponseWriter, r *http.Request) {
+	n, err := a.svc.store.ClearBlocklist(r.Context())
+	if err != nil {
+		api.WriteError(w, http.StatusInternalServerError, "internal", "failed to clear blocklist")
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, map[string]int64{"removed": n})
 }
 
 func (a *API) importItem(w http.ResponseWriter, r *http.Request) {
@@ -131,16 +214,13 @@ func (a *API) importItem(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) history(w http.ResponseWriter, r *http.Request) {
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	rows, err := a.svc.store.ListHistory(r.Context(), limit)
+	page, size, offset := pageParams(r)
+	rows, total, err := a.svc.store.ListHistoryPage(r.Context(), offset, size)
 	if err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "internal", "failed to list history")
 		return
 	}
-	if rows == nil {
-		rows = []store.HistoryEvent{}
-	}
-	api.WriteJSON(w, http.StatusOK, rows)
+	api.WriteJSON(w, http.StatusOK, pagedResponse{Items: rows, Page: page, PageSize: size, Total: total})
 }
 
 type blocklistDTO struct {
@@ -149,7 +229,8 @@ type blocklistDTO struct {
 }
 
 func (a *API) listBlocklist(w http.ResponseWriter, r *http.Request) {
-	rows, err := a.svc.store.ListBlocklist(r.Context())
+	page, size, offset := pageParams(r)
+	rows, total, err := a.svc.store.ListBlocklistPage(r.Context(), offset, size)
 	if err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "internal", "failed to list blocklist")
 		return
@@ -168,7 +249,7 @@ func (a *API) listBlocklist(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, blocklistDTO{Blocklist: bl, Title: title})
 	}
-	api.WriteJSON(w, http.StatusOK, out)
+	api.WriteJSON(w, http.StatusOK, pagedResponse{Items: out, Page: page, PageSize: size, Total: total})
 }
 
 func (a *API) removeBlocklist(w http.ResponseWriter, r *http.Request) {
@@ -217,6 +298,8 @@ func (a *API) writeErr(w http.ResponseWriter, err error) {
 		api.WriteError(w, http.StatusBadRequest, "no_profile", err.Error())
 	case errors.Is(err, store.ErrNotFound):
 		api.WriteError(w, http.StatusNotFound, "not_found", "not found")
+	case errors.Is(err, ErrClientUnavailable):
+		api.WriteError(w, http.StatusServiceUnavailable, "client_unavailable", err.Error())
 	default:
 		api.WriteError(w, http.StatusInternalServerError, "internal", "internal error")
 	}
