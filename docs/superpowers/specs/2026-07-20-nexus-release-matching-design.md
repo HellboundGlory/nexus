@@ -1,8 +1,9 @@
-# Nexus — Release matching: aliases, episode-title contradiction, per-series terms
+# Nexus — Release matching: series aliases and episode-title contradiction
 
 **Date:** 2026-07-20
 **Status:** Approved (design), ready for implementation planning
 **Branch:** `feat/release-matching`, off `master` `481dc7e`
+**Scope:** SP-1 of 3 — see §9 for the sequenced follow-ons
 
 ## 1. Problem
 
@@ -70,20 +71,17 @@ unavailable on this indexer.
 Adopt Sonarr's architecture: never trust the indexer, resolve every release back to a
 series, and reject anything that does not resolve to the series being searched
 (`NzbDrone.Core/Parser/ParsingService.FindSeries`). Sonarr's matching is richer than
-Nexus's in two ways that matter here — **alias titles** and **user-controlled release
-restrictions** — and this design adopts both, plus one signal specific to this failure
-mode.
+Nexus's in two ways — **alias titles** and **user-controlled release restrictions**. This
+sub-project adopts the first, plus one signal specific to this failure mode. The second
+becomes SP-3 (§9).
 
-Four checks, applied in this order wherever more than one applies (cheapest and most
-decisive first, keeping rejection reasons legible):
+Two checks, applied in this order:
 
 1. Series match (primary title **or alias**)
 2. Episode-title contradiction
-3. Required terms
-4. Ignored terms
 
-Not every site runs all four — the RSS path already resolves the series by other means and
-takes only the term checks. §6 enumerates exactly which checks run where.
+Both replace or extend the existing `releaseIsForSeries`. Backend only — no UI, no
+`web/dist` rebuild.
 
 ## 3. Component: series aliases
 
@@ -160,14 +158,6 @@ Two guards carried over from the RSS path's `matchSeries`:
 marker, terminated at the first recognised source / resolution / codec token. The parser
 already recognises those tokens.
 
-Two edge cases, made explicit so they are not decided by accident:
-
-- **No terminating token** — the remainder of the title becomes the episode title. Any
-  trailing release-group suffix (`-iVy`) is left in; the overlap comparison in §4.2
-  tolerates it, since it only needs one side to contain the other.
-- **No `S##E##` marker at all** — `EpisodeTitle` is empty. Such releases already fail the
-  season/episode filter upstream, so this adds no new behaviour.
-
 Worked examples from live indexer data:
 
 | Release | Extracted | Signal |
@@ -176,6 +166,14 @@ Worked examples from live indexer data:
 | `Pokemon.S01E01.DVDRip.x264-QCF` | `` (stops at `DVDRip`) | absent |
 | `Pokemon.S01E01.PDTV.HebDub.XviD-Sweet-Star` | `` (stops at `PDTV`) | absent |
 | `Pokmon.Indigo.League.s01e01` | `` (nothing follows) | absent |
+
+Two edge cases, made explicit so they are not decided by accident:
+
+- **No terminating token** — the remainder of the title becomes the episode title. Any
+  trailing release-group suffix (`-iVy`) is left in; the overlap comparison in §4.2
+  tolerates it, since it only needs one side to contain the other.
+- **No `S##E##` marker at all** — `EpisodeTitle` is empty. Such releases already fail the
+  season/episode filter upstream, so this adds no new behaviour.
 
 ### 4.2 Rule: reject only on positive contradiction
 
@@ -190,66 +188,28 @@ Applied to the failure: stored episode `9209` is `"Pokémon - I Choose You!"`; t
 release yields `"The Pendant That Starts It All Part 1"`; no overlap, rejected. The
 `DVDRip` and `Indigo.League` releases yield nothing and are unaffected.
 
-## 5. Component: per-series required / ignored terms
+## 5. Application points
 
-Migration `0009` also adds to `series`: `required_terms` and `ignored_terms` (JSON arrays,
-default empty) and `required_mode` (TEXT, default `'any'`).
+Both checks apply at the three TV grab paths. This project has been bitten three times by
+fixing one site and missing the others, so the sites are enumerated explicitly:
 
-Semantics follow Sonarr's `ReleaseRestrictionsSpecification`, with one addition:
+| Site | File |
+|---|---|
+| `searchEpisode` | `internal/automation/search.go` |
+| `searchSeason` pack branch | `internal/automation/search.go` |
+| `upgradeEpisode` | `internal/automation/upgrade.go` |
 
-- **Required:** if any terms are set, the release title must satisfy them according to
-  `required_mode`:
-  - `any` (**default**) — contain **at least one** term. This is Sonarr's behaviour.
-  - `all` — contain **every** term. Not in Sonarr; added because "any" alone cannot
-    express a genuine conjunction, e.g. requiring both `Indigo` and `1080p`.
-- **Ignored:** if the release title contains **any** term, reject. No mode — "contains any
-  forbidden token" is already the only sensible reading, and an "all" variant would mean
-  "reject only if it contains every bad word", which nobody wants.
-- Case-insensitive **substring** match on the **raw release title**, not the parsed title,
-  so tokens parsing strips (`HebDub`, `-BurCyg`) remain targetable.
-- `required_mode` is ignored when `required_terms` is empty, and any value other than
-  `all` is treated as `any` so a bad or missing value fails to the permissive default
-  rather than silently rejecting everything.
+`rssPlaceTV` (`internal/automation/rss.go`) already resolves the series via `matchSeries`
+and needs neither check. It should, however, benefit from aliases: `matchSeries`'s
+`seriesByTitle` index is built from primary titles only, so an aliased release does not
+match there either. Extending that index to include aliases is **in scope** for this
+sub-project, since it is the same data and the same defect.
 
-**Divergence from Sonarr, deliberate:** Sonarr attaches these via a global `ReleaseProfile`
-scoped by **tags**. Nexus has no tags subsystem (migrations stop at `0008`), and building
-one to hold two string lists is disproportionate. Per-series fields instead.
+## 6. Testing
 
-**Regex is out of scope for this pass.** Sonarr supports `/pattern/` terms via
-`PerlRegexFactory`/`TermMatcherService`. That is a second matching engine plus escaping
-rules; plain substrings cover the known cases. Additive later if substrings prove blunt.
-
-## 6. Application points
-
-All four checks apply at the three TV grab paths. This project has been bitten three times
-by fixing one site and missing the others, so the sites are enumerated explicitly:
-
-| Site | File | Checks |
-|---|---|---|
-| `searchEpisode` | `internal/automation/search.go` | all four |
-| `searchSeason` pack branch | `internal/automation/search.go` | all four |
-| `upgradeEpisode` | `internal/automation/upgrade.go` | all four |
-| `rssPlaceTV` | `internal/automation/rss.go` | terms only |
-
-RSS already resolves the series via `matchSeries` and needs no alias or episode-title
-check, but has **no term filtering today**; Sonarr applies restrictions to every download
-decision, not only searches.
-
-## 7. Frontend
-
-Two textareas on the series detail page (one term per line) for required and ignored
-terms, plus a **Match any / Match all** control on the required field bound to
-`required_mode`. Following existing settings-form patterns; CSS custom properties only.
-`web/dist` rebuilt once, in the final task.
-
-The mode control is only meaningful with two or more required terms, but it renders
-unconditionally — hiding it would leave users unable to discover the option.
-
-## 8. Testing
-
-- Each of the four checks gets its own test **at each path it guards**. A passing test on
-  the search path proves nothing about RSS or upgrades — that is precisely how the three
-  previous fixes each missed a site.
+- Each check gets its own test **at each path it guards**. A passing test on the search
+  path proves nothing about RSS or upgrades — that is precisely how the three previous
+  fixes each missed a site.
 - Every gate test is mutation-verified: neuter the check, confirm the test fails, revert.
   Report any mutation that comes back green rather than papering over it.
 - **The saga regression test**, seeded from real production data: series `Pokémon` with
@@ -259,13 +219,8 @@ unconditionally — hiding it would leave users unable to discover the option.
   survive. This is the guard for the entire incident.
 - A fixture must make outcomes visibly differ: a series with several missing episodes, and
   candidates that differ in *which* check would reject them.
-- **`required_mode` needs at least two terms and a candidate matching exactly one of them**
-  to be tested at all. With a single term, or with a candidate matching both, `any` and
-  `all` produce identical results and the test passes against either mode — the same
-  fixture trap that made three earlier tests on this project vacuous. The `all` test must
-  also be mutation-verified against forcing the mode to `any`.
 
-## 9. Out of scope
+## 7. Out of scope for SP-1
 
 - **Storing tvdbid** — probed and proven not to change the outcome (§1.3).
 - **Anime absolute numbering.** `[EncoderAnon]Pocket Monsters (Pokemon) Episode 001…` and
@@ -275,14 +230,58 @@ unconditionally — hiding it would leave users unable to discover the option.
 - **Dub / language filtering.** `ParsedRelease.Languages` exists but nothing filters on it;
   `Pokemon.S01E01.PDTV.HebDub…` ranks alongside English releases. User has explicitly
   requested this for a later sub-project.
-- **Regex terms** (§5), **alias `type`/season parsing** (§3.2), **movie-side title
-  verification** — `searchMovie` has no equivalent check, but movie searches use
-  imdbid/tmdbid which newznab does honour for movies, so the risk is materially lower.
+- **Alias `type`/season parsing** (§3.2).
+- **Movie-side title verification** — `searchMovie` has no equivalent check, but movie
+  searches use imdbid/tmdbid which newznab does honour for movies, so the risk is
+  materially lower.
 
-## 10. Known consequences
+## 8. Known consequences
 
 - Six wrong episodes are already imported. Those episodes have files, so a re-search skips
   them; the user must delete them with files and re-search. **This design prevents
   recurrence; it does not undo what landed.**
-- A release whose scene name matches no alias is rejected. That is the intended trade:
-  a missed grab is recoverable, a wrong grab is not.
+- A release whose scene name matches neither the primary title nor any alias is rejected.
+  That is the intended trade: a missed grab is recoverable, a wrong grab is not.
+
+## 9. Sequenced follow-ons (SP-2, SP-3)
+
+Release restrictions were part of the original design discussion and are deliberately
+deferred, because the part that fixes the live bug has no dependencies and should not wait
+behind a subsystem. Both are user-approved in shape.
+
+### SP-2 — Tags
+
+A tags subsystem, matching Sonarr and Radarr: tag table, CRUD API, settings UI, and
+attachment to **both series and movies**. Movies are explicitly included — Radarr has
+release profiles for movies, so a series-only tag system would need revisiting
+immediately.
+
+Nexus has no tags today (migrations stop at `0008` before SP-1's `0009`).
+
+### SP-3 — Release profiles *(depends on SP-2)*
+
+Sonarr-placed at **Settings → Profiles → Release Profiles**
+(`frontend/src/Settings/Profiles/Release/` in the Sonarr reference), as reusable named
+profiles scoped to media by tag — not per-series fields on a detail page.
+
+Carried forward from the SP-1 design discussion, already settled:
+
+- **Required** terms with a `required_mode` of `any` (default, Sonarr's behaviour) or
+  `all`. Sonarr offers only `any`, which cannot express a genuine conjunction such as
+  requiring both `Indigo` and `1080p`; `all` is a deliberate addition. Any value other
+  than `all` is treated as `any`, so a bad value fails to the permissive default rather
+  than silently rejecting everything.
+- **Ignored** terms: reject if the title contains any. No mode — an "all" variant would
+  mean "reject only if it contains every bad word", which is never wanted.
+- Case-insensitive **substring** match on the **raw release title**, not the parsed title,
+  so tokens parsing strips (`HebDub`, `-BurCyg`) remain targetable.
+- **Regex is out of scope.** Sonarr supports `/pattern/` via
+  `PerlRegexFactory`/`TermMatcherService`; that is a second matching engine plus escaping
+  rules. Additive later if substrings prove blunt.
+- Applied at the three TV grab paths **and** `rssPlaceTV` — Sonarr applies restrictions to
+  every download decision, not only searches — and at the movie paths once tags cover
+  movies.
+- **Testing note:** `required_mode` is only testable with **two terms and a candidate
+  matching exactly one of them**. With a single term, or a candidate matching both, `any`
+  and `all` produce identical results and the test passes against either mode — the same
+  fixture trap that made three earlier tests on this project vacuous.
