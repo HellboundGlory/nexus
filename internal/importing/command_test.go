@@ -123,9 +123,19 @@ func (f *fakeResearcher) ResearchEpisode(_ context.Context, id int64) error {
 func (f *fakeResearcher) ResearchSeries(ctx context.Context, id int64) error {
 	f.series = append(f.series, id)
 	if f.st != nil {
-		rows, _ := f.st.QueueByStatus(ctx, store.QueueGrabbed)
+		// Mirror the real per-series budget's status filter exactly
+		// (internal/automation/search.go's activeQueue): a row counts as
+		// in-flight while QueueGrabbed OR QueueImporting. ImportItem sets a
+		// row to QueueImporting and only clears it via DeleteQueueItem, so
+		// counting QueueGrabbed alone would let this observation read 0 while
+		// the row is still mid-import — vacuously satisfying the ordering
+		// pin regardless of whether the row was actually deleted first.
+		rows, _ := f.st.ListQueue(ctx)
 		n := 0
 		for _, r := range rows {
+			if r.Status != store.QueueGrabbed && r.Status != store.QueueImporting {
+				continue
+			}
 			if r.SeriesID != nil && *r.SeriesID == id {
 				n++
 			}
