@@ -2,6 +2,7 @@ package automation
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/hellboundg/nexus/internal/core/provider"
@@ -303,6 +304,131 @@ func TestRSSSyncSkipsBlocklistedRelease(t *testing.T) {
 	}
 	if fe.reqs[0].DownloadURL != "clean" {
 		t.Fatalf("blocklisted release must not be grabbed; want clean alternative, got %q", fe.reqs[0].DownloadURL)
+	}
+}
+
+func TestRSSSyncStopsAtPerSeriesLimit(t *testing.T) {
+	st := newStore(t)
+	ctx := context.Background()
+	seedSeries(t, st, true, 5)
+	// One release per episode: ungated, RSS would place all five.
+	fs := &fakeSearcher{releases: episodeReleases(5)}
+	fe := &fakeEnqueuer{}
+	svc := NewService(st, fs, fe, nil)
+	// Default config → limit 1.
+
+	res, err := svc.RSSSync(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Grabbed != 1 || len(fe.reqs) != 1 {
+		t.Fatalf("RSS must respect the per-series limit: grabbed=%d reqs=%d", res.Grabbed, len(fe.reqs))
+	}
+}
+
+// TestRSSSyncPackBranchRespectsPerSeriesLimit isolates rssPlaceTV's season-pack
+// branch: two fully-missing monitored seasons, each with its own acceptable
+// season-pack release. If bud.take() were missing from the pack branch, both
+// packs would be grabbed; the per-series budget (default 1) must stop it at
+// one, proving the pack branch's take() call is load-bearing.
+func TestRSSSyncPackBranchRespectsPerSeriesLimit(t *testing.T) {
+	st := newStore(t)
+	ctx := context.Background()
+	sid, _ := seedSeries(t, st, true, 2) // season 1: 2 fully-missing episodes
+	if err := st.UpsertSeason(ctx, store.Season{SeriesID: sid, SeasonNumber: 2, Monitored: true}); err != nil {
+		t.Fatal(err)
+	}
+	for i := 1; i <= 2; i++ {
+		if err := st.UpsertEpisode(ctx, store.Episode{SeriesID: sid, SeasonNumber: 2, EpisodeNumber: i, Monitored: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fs := &fakeSearcher{releases: []provider.Release{
+		{Title: "The.Show.S01.1080p.BluRay.x264-GRP", DownloadURL: "p1", Protocol: provider.ProtocolUsenet, Categories: []int{5040}},
+		{Title: "The.Show.S02.1080p.BluRay.x264-GRP", DownloadURL: "p2", Protocol: provider.ProtocolUsenet, Categories: []int{5040}},
+	}}
+	fe := &fakeEnqueuer{}
+	svc := NewService(st, fs, fe, nil)
+	// Default config → limit 1.
+
+	res, err := svc.RSSSync(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Grabbed != 1 || len(fe.reqs) != 1 {
+		t.Fatalf("pack branch must respect the per-series limit across seasons: grabbed=%d reqs=%d", res.Grabbed, len(fe.reqs))
+	}
+}
+
+// TestRSSSyncUngatedWhenLimitZero is the RSS-path off-switch test: limit 0
+// disables the gate entirely, so the Step-1 fixture's five per-episode
+// releases must all be grabbed.
+func TestRSSSyncUngatedWhenLimitZero(t *testing.T) {
+	st := newStore(t)
+	ctx := context.Background()
+	seedSeries(t, st, true, 5)
+	fs := &fakeSearcher{releases: episodeReleases(5)}
+	fe := &fakeEnqueuer{}
+	svc := NewService(st, fs, fe, nil)
+	c := DefaultConfig()
+	c.MaxConcurrentPerSeries = 0
+	if err := svc.SetConfig(ctx, c); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := svc.RSSSync(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Grabbed != 5 || len(fe.reqs) != 5 {
+		t.Fatalf("limit 0 disables the gate, want all 5: grabbed=%d reqs=%d", res.Grabbed, len(fe.reqs))
+	}
+}
+
+// TestRSSSyncIgnoresOtherSeriesInFlight is the RSS-path cross-series isolation
+// test: a DIFFERENT series (distinct TMDBID, since seedSeries hardcodes
+// TMDBID 7 and download_queue.series_id has a real FK to series(id)) is
+// saturated with in-flight rows (each needing a distinct ClientItemID, or the
+// UNIQUE(download_client_id, client_item_id) insert fails), and the series
+// under test must still grab its full default budget of 1.
+func TestRSSSyncIgnoresOtherSeriesInFlight(t *testing.T) {
+	st := newStore(t)
+	ctx := context.Background()
+	seedSeries(t, st, true, 5)
+
+	otherID, err := st.CreateSeries(ctx, store.Series{TMDBID: 999, Title: "Other Show", Monitored: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertSeason(ctx, store.Season{SeriesID: otherID, SeasonNumber: 1, Monitored: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertEpisode(ctx, store.Episode{SeriesID: otherID, SeasonNumber: 1, EpisodeNumber: 1, Monitored: true}); err != nil {
+		t.Fatal(err)
+	}
+	otherEps, err := st.ListEpisodes(ctx, otherID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 5; i++ {
+		if _, err := st.EnqueueGrab(ctx, store.QueueItem{
+			ClientItemID: fmt.Sprintf("other-%d", i),
+			MediaKind:    "tv", SeriesID: &otherID, EpisodeIDs: []int64{otherEps[0].ID}, Status: store.QueueGrabbed,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	fs := &fakeSearcher{releases: episodeReleases(5)}
+	fe := &fakeEnqueuer{}
+	svc := NewService(st, fs, fe, nil)
+
+	res, err := svc.RSSSync(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Grabbed != 1 || len(fe.reqs) != 1 {
+		t.Fatalf("another series' in-flight rows must not affect this series' budget: grabbed=%d reqs=%d", res.Grabbed, len(fe.reqs))
 	}
 }
 

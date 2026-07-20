@@ -16,6 +16,7 @@ const cfg = {
   rssSyncEnabled: true, rssSyncIntervalMinutes: 15,
   upgradeSearchEnabled: true, upgradeSearchIntervalHours: 12,
   upgradeSearchBatchSize: 100, upgradeGrabCooldownHours: 168,
+  maxConcurrentPerSeries: 3,
 }
 
 function mut(extra: object = {}) {
@@ -62,6 +63,23 @@ describe("GeneralSection", () => {
     await userEvent.click(screen.getByLabelText(/rss sync enabled/i))
     await userEvent.click(screen.getByRole("button", { name: /save/i }))
     expect(save).toHaveBeenCalledWith(expect.objectContaining({ rssSyncEnabled: false }), expect.anything())
+  })
+
+  it("renders the per-series concurrency limit bound to the config value", () => {
+    setup()
+    expect(screen.getByLabelText(/max concurrent downloads per series/i)).toHaveValue(3)
+  })
+
+  it("omits maxConcurrentPerSeries from the save payload when cleared to 0 (the documented off switch)", async () => {
+    const save = vi.fn()
+    setup(save)
+    const perSeries = screen.getByLabelText(/max concurrent downloads per series/i)
+    await userEvent.clear(perSeries)
+    await userEvent.click(screen.getByRole("button", { name: /save/i }))
+    expect(save).toHaveBeenCalledWith(
+      expect.not.objectContaining({ maxConcurrentPerSeries: expect.anything() }),
+      expect.anything(),
+    )
   })
 
   it("re-syncs the form to the server config after a save that cleared a field", async () => {

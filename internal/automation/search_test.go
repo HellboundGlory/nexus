@@ -208,6 +208,7 @@ func TestSearchSeasonFullyMissingPrefersPack(t *testing.T) {
 
 func TestSearchSeasonNoPackFallsBackToEpisodes(t *testing.T) {
 	st := newStore(t)
+	ctx := context.Background()
 	sid, _ := seedSeries(t, st, true, 2)
 	// Searcher returns only per-episode singles regardless of query (no pack).
 	fs := &fakeSearcher{releases: []provider.Release{
@@ -216,8 +217,16 @@ func TestSearchSeasonNoPackFallsBackToEpisodes(t *testing.T) {
 	}}
 	fe := &fakeEnqueuer{}
 	svc := NewService(st, fs, fe, nil)
+	// This test is about per-episode fallback covering every missing episode,
+	// not about the per-series concurrency gate — disable the gate so both of
+	// the two seeded missing episodes are grabbed as originally intended.
+	c := DefaultConfig()
+	c.MaxConcurrentPerSeries = 0
+	if err := svc.SetConfig(ctx, c); err != nil {
+		t.Fatal(err)
+	}
 
-	n, err := svc.SearchSeason(context.Background(), sid, 1)
+	n, err := svc.SearchSeason(ctx, sid, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -341,10 +350,11 @@ func TestSearchEpisodeSkipsWhenAlreadyQueued(t *testing.T) {
 
 func TestSearchSeasonTreatsQueuedEpisodeAsNotMissing(t *testing.T) {
 	st := newStore(t)
+	ctx := context.Background()
 	sid, epIDs := seedSeries(t, st, true, 2)
 	// ep1 is already actively queued; only ep2 is truly missing.
 	e1 := epIDs[0]
-	if _, err := st.EnqueueGrab(context.Background(), store.QueueItem{
+	if _, err := st.EnqueueGrab(ctx, store.QueueItem{
 		MediaKind: "tv", SeriesID: &sid, EpisodeIDs: []int64{e1}, Status: store.QueueGrabbed,
 	}); err != nil {
 		t.Fatal(err)
@@ -354,7 +364,16 @@ func TestSearchSeasonTreatsQueuedEpisodeAsNotMissing(t *testing.T) {
 	}}
 	fe := &fakeEnqueuer{}
 	svc := NewService(st, fs, fe, nil)
-	n, err := svc.SearchSeason(context.Background(), sid, 1)
+	// This test is about missing-detection (a queued episode is not
+	// re-searched), not the per-series concurrency gate. ep1's in-flight row
+	// would otherwise exhaust the default budget of 1 before ep2 is even
+	// considered, which is a different concern — disable the gate.
+	c := DefaultConfig()
+	c.MaxConcurrentPerSeries = 0
+	if err := svc.SetConfig(ctx, c); err != nil {
+		t.Fatal(err)
+	}
+	n, err := svc.SearchSeason(ctx, sid, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -364,6 +383,344 @@ func TestSearchSeasonTreatsQueuedEpisodeAsNotMissing(t *testing.T) {
 	// Not fully missing (ep1 in flight) → per-episode search, not a pack.
 	if fs.lastQuery.Episode == nil {
 		t.Fatalf("should be a per-episode search, got %+v", fs.lastQuery)
+	}
+}
+
+// episodeReleases returns one release per episode of season 1, so a series
+// search would grab every episode if nothing stopped it.
+func episodeReleases(n int) []provider.Release {
+	var rs []provider.Release
+	for i := 1; i <= n; i++ {
+		rs = append(rs, provider.Release{
+			Title:       fmt.Sprintf("The.Show.S01E%02d.1080p.BluRay.x264-GRP", i),
+			DownloadURL: fmt.Sprintf("e%d", i),
+			Protocol:    provider.ProtocolUsenet,
+		})
+	}
+	return rs
+}
+
+func TestSearchSeriesStopsAtPerSeriesLimit(t *testing.T) {
+	st := newStore(t)
+	ctx := context.Background()
+	sid, _ := seedSeries(t, st, true, 5)
+	fs := &fakeSearcher{releases: episodeReleases(5)}
+	fe := &fakeEnqueuer{}
+	svc := NewService(st, fs, fe, nil)
+	// Default config → limit 1.
+
+	n, err := svc.SearchSeries(ctx, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 || len(fe.reqs) != 1 {
+		t.Fatalf("limit 1 must grab exactly 1 of 5 missing episodes: n=%d reqs=%d", n, len(fe.reqs))
+	}
+}
+
+func TestSearchSeriesRespectsHigherLimit(t *testing.T) {
+	st := newStore(t)
+	ctx := context.Background()
+	sid, _ := seedSeries(t, st, true, 5)
+	fs := &fakeSearcher{releases: episodeReleases(5)}
+	fe := &fakeEnqueuer{}
+	svc := NewService(st, fs, fe, nil)
+	c := DefaultConfig()
+	c.MaxConcurrentPerSeries = 3
+	if err := svc.SetConfig(ctx, c); err != nil {
+		t.Fatal(err)
+	}
+
+	n, err := svc.SearchSeries(ctx, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 3 || len(fe.reqs) != 3 {
+		t.Fatalf("limit 3 must grab exactly 3: n=%d reqs=%d", n, len(fe.reqs))
+	}
+}
+
+func TestSearchSeriesUngatedWhenLimitZero(t *testing.T) {
+	st := newStore(t)
+	ctx := context.Background()
+	sid, _ := seedSeries(t, st, true, 5)
+	fs := &fakeSearcher{releases: episodeReleases(5)}
+	fe := &fakeEnqueuer{}
+	svc := NewService(st, fs, fe, nil)
+	c := DefaultConfig()
+	c.MaxConcurrentPerSeries = 0
+	if err := svc.SetConfig(ctx, c); err != nil {
+		t.Fatal(err)
+	}
+
+	n, err := svc.SearchSeries(ctx, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 5 || len(fe.reqs) != 5 {
+		t.Fatalf("limit 0 disables the gate, want all 5: n=%d reqs=%d", n, len(fe.reqs))
+	}
+}
+
+// An in-flight row created directly (as a manual grab would) occupies the slot.
+func TestSearchSeriesCountsExistingInFlightRow(t *testing.T) {
+	st := newStore(t)
+	ctx := context.Background()
+	sid, epIDs := seedSeries(t, st, true, 5)
+	if _, err := st.EnqueueGrab(ctx, store.QueueItem{
+		MediaKind: "tv", SeriesID: &sid, EpisodeIDs: []int64{epIDs[0]}, Status: store.QueueGrabbed,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	fs := &fakeSearcher{releases: episodeReleases(5)}
+	fe := &fakeEnqueuer{}
+	svc := NewService(st, fs, fe, nil)
+
+	n, err := svc.SearchSeries(ctx, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 || len(fe.reqs) != 0 {
+		t.Fatalf("series already at limit must grab nothing: n=%d reqs=%d", n, len(fe.reqs))
+	}
+}
+
+// The budget spans seasons: two fully-missing seasons must still yield 1 grab.
+func TestSearchSeriesBudgetSpansSeasons(t *testing.T) {
+	st := newStore(t)
+	ctx := context.Background()
+	sid, _ := seedSeries(t, st, true, 2) // creates season 1 only
+	if err := st.UpsertSeason(ctx, store.Season{SeriesID: sid, SeasonNumber: 2, Monitored: true}); err != nil {
+		t.Fatal(err)
+	}
+	for i := 1; i <= 2; i++ {
+		if err := st.UpsertEpisode(ctx, store.Episode{
+			SeriesID: sid, SeasonNumber: 2, EpisodeNumber: i, Monitored: true,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fs := &fakeSearcher{releases: []provider.Release{
+		{Title: "The.Show.S01.1080p.BluRay.x264-GRP", DownloadURL: "p1", Protocol: provider.ProtocolUsenet},
+		{Title: "The.Show.S02.1080p.BluRay.x264-GRP", DownloadURL: "p2", Protocol: provider.ProtocolUsenet},
+	}}
+	fe := &fakeEnqueuer{}
+	svc := NewService(st, fs, fe, nil)
+
+	n, err := svc.SearchSeries(ctx, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 || len(fe.reqs) != 1 {
+		t.Fatalf("budget is per series, not per season: n=%d reqs=%d", n, len(fe.reqs))
+	}
+}
+
+// TestSearchSeriesIgnoresOtherSeriesInFlight is the controller-addendum test:
+// the five gate tests above cannot distinguish inFlight[seriesID] from a sum
+// across all series, because they only ever have one series with in-flight
+// rows. Here a DIFFERENT series (distinct TMDBID, since seedSeries hardcodes
+// TMDBID 7 and download_queue.series_id has a real FK to series(id)) is
+// saturated with in-flight rows, and the searched series must still grab its
+// full default budget of 1.
+func TestSearchSeriesIgnoresOtherSeriesInFlight(t *testing.T) {
+	st := newStore(t)
+	ctx := context.Background()
+	sid, _ := seedSeries(t, st, true, 5)
+
+	otherID, err := st.CreateSeries(ctx, store.Series{TMDBID: 999, Title: "Other Show", Monitored: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertSeason(ctx, store.Season{SeriesID: otherID, SeasonNumber: 1, Monitored: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertEpisode(ctx, store.Episode{SeriesID: otherID, SeasonNumber: 1, EpisodeNumber: 1, Monitored: true}); err != nil {
+		t.Fatal(err)
+	}
+	otherEps, err := st.ListEpisodes(ctx, otherID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Saturate the OTHER series with several in-flight rows — enough that if
+	// the gate summed across all series instead of keying on seriesID, the
+	// searched series would be refused too. Each row needs a distinct
+	// ClientItemID or the UNIQUE(download_client_id, client_item_id) insert fails.
+	for i := 0; i < 5; i++ {
+		if _, err := st.EnqueueGrab(ctx, store.QueueItem{
+			ClientItemID: fmt.Sprintf("other-%d", i),
+			MediaKind:    "tv", SeriesID: &otherID, EpisodeIDs: []int64{otherEps[0].ID}, Status: store.QueueGrabbed,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	fs := &fakeSearcher{releases: episodeReleases(5)}
+	fe := &fakeEnqueuer{}
+	svc := NewService(st, fs, fe, nil)
+
+	n, err := svc.SearchSeries(ctx, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 || len(fe.reqs) != 1 {
+		t.Fatalf("another series' in-flight rows must not affect this series' budget: n=%d reqs=%d", n, len(fe.reqs))
+	}
+}
+
+// TestSearchEpisodeRespectsBudgetOnDirectEntry isolates searchEpisode's own
+// "!bud.allows()" guard. A direct SearchEpisode call never goes through
+// searchSeason's per-episode loop (whose own "!bud.allows() { break }" guard
+// would otherwise mask this guard's absence), so this is the only test that
+// can catch that specific guard being deleted.
+func TestSearchEpisodeRespectsBudgetOnDirectEntry(t *testing.T) {
+	st := newStore(t)
+	ctx := context.Background()
+	sid, epIDs := seedSeries(t, st, true, 2)
+	// Saturate the series' default budget of 1 with an in-flight row for ep1.
+	if _, err := st.EnqueueGrab(ctx, store.QueueItem{
+		ClientItemID: "budget-holder", MediaKind: "tv", SeriesID: &sid, EpisodeIDs: []int64{epIDs[0]}, Status: store.QueueGrabbed,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	fs := &fakeSearcher{releases: []provider.Release{
+		{Title: "The.Show.S01E02.1080p.BluRay.x264-GRP", DownloadURL: "e2", Protocol: provider.ProtocolUsenet},
+	}}
+	fe := &fakeEnqueuer{}
+	svc := NewService(st, fs, fe, nil)
+
+	n, err := svc.SearchEpisode(ctx, epIDs[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 || len(fe.reqs) != 0 {
+		t.Fatalf("series already at its budget must refuse a direct episode search: n=%d reqs=%d", n, len(fe.reqs))
+	}
+}
+
+// TestSearchSeasonPackRespectsBudgetWhenAlreadyExhausted isolates
+// searchSeason's early "!bud.allows()" return, which guards the season-pack
+// branch specifically. A direct SearchSeason call never goes through
+// searchSeries' outer per-season loop (whose own defense-in-depth guard would
+// otherwise mask this guard's absence), and the fixture here only offers a
+// season pack — no singles — so the per-episode loop's guard never even comes
+// into play. This is the only test that can catch this guard being deleted.
+func TestSearchSeasonPackRespectsBudgetWhenAlreadyExhausted(t *testing.T) {
+	st := newStore(t)
+	ctx := context.Background()
+	sid, _ := seedSeries(t, st, true, 2) // season 1: 2 fully-missing episodes
+	if err := st.UpsertSeason(ctx, store.Season{SeriesID: sid, SeasonNumber: 2, Monitored: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertEpisode(ctx, store.Episode{SeriesID: sid, SeasonNumber: 2, EpisodeNumber: 1, Monitored: true}); err != nil {
+		t.Fatal(err)
+	}
+	eps, err := st.ListEpisodes(ctx, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var s2ep int64
+	for _, e := range eps {
+		if e.SeasonNumber == 2 {
+			s2ep = e.ID
+		}
+	}
+	if s2ep == 0 {
+		t.Fatal("season 2 episode not found")
+	}
+	// Saturate the series' default budget of 1 with an in-flight row for the
+	// season-2 episode, leaving season 1 fully missing but budget-exhausted.
+	if _, err := st.EnqueueGrab(ctx, store.QueueItem{
+		ClientItemID: "budget-holder", MediaKind: "tv", SeriesID: &sid, EpisodeIDs: []int64{s2ep}, Status: store.QueueGrabbed,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Only a season-1 pack is offered — no per-episode singles — so a grab
+	// here can only come from the pack branch, which only searchSeason's
+	// early guard protects.
+	fs := &fakeSearcher{releases: []provider.Release{
+		{Title: "The.Show.S01.1080p.BluRay.x264-GRP", DownloadURL: "pack", Protocol: provider.ProtocolUsenet},
+	}}
+	fe := &fakeEnqueuer{}
+	svc := NewService(st, fs, fe, nil)
+
+	n, err := svc.SearchSeason(ctx, sid, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 || len(fe.reqs) != 0 {
+		t.Fatalf("series already at its budget must refuse a fully-missing season's pack: n=%d reqs=%d", n, len(fe.reqs))
+	}
+	if fs.lastQuery.Type != "" {
+		t.Fatalf("budget-exhausted season must not even search: %+v", fs.lastQuery)
+	}
+}
+
+func TestSearchSeasonTriesNextPackWhenFirstIsBlocklisted(t *testing.T) {
+	st := newStore(t)
+	ctx := context.Background()
+	sid, _ := seedSeries(t, st, true, 3)
+	fs := &fakeSearcher{releases: []provider.Release{
+		{Title: "The.Show.S01.1080p.BluRay.x264-GRP", DownloadURL: "pack1", Protocol: provider.ProtocolUsenet},
+		{Title: "The.Show.S01.1080p.WEB-DL.x264-GRP", DownloadURL: "pack2", Protocol: provider.ProtocolUsenet},
+		{Title: "The.Show.S01E01.1080p.BluRay.x264-GRP", DownloadURL: "ep1", Protocol: provider.ProtocolUsenet},
+	}}
+	fe := &fakeEnqueuer{}
+	svc := NewService(st, fs, fe, nil)
+
+	// The first pack has already failed and been blocklisted, exactly as
+	// handleFailed would leave things before calling ResearchSeries.
+	if _, err := st.AddBlocklist(ctx, store.Blocklist{
+		MediaKind: "tv", SeriesID: &sid,
+		SourceTitle: "The.Show.S01.1080p.BluRay.x264-GRP",
+		Protocol:    "usenet", Reason: "unpack failed",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	n, err := svc.SearchSeries(ctx, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 || len(fe.reqs) != 1 {
+		t.Fatalf("want exactly 1 grab, got n=%d reqs=%d", n, len(fe.reqs))
+	}
+	if fe.reqs[0].DownloadURL != "pack2" {
+		t.Fatalf("must try the next PACK before per-episode, got %q", fe.reqs[0].DownloadURL)
+	}
+	if len(fe.reqs[0].EpisodeIDs) != 3 {
+		t.Fatalf("a pack grab covers every missing episode, got %v", fe.reqs[0].EpisodeIDs)
+	}
+}
+
+func TestSearchSeasonFallsBackToEpisodesWhenPacksExhausted(t *testing.T) {
+	st := newStore(t)
+	ctx := context.Background()
+	sid, _ := seedSeries(t, st, true, 3)
+	fs := &fakeSearcher{releases: []provider.Release{
+		{Title: "The.Show.S01.1080p.BluRay.x264-GRP", DownloadURL: "pack1", Protocol: provider.ProtocolUsenet},
+		{Title: "The.Show.S01E01.1080p.BluRay.x264-GRP", DownloadURL: "ep1", Protocol: provider.ProtocolUsenet},
+	}}
+	fe := &fakeEnqueuer{}
+	svc := NewService(st, fs, fe, nil)
+
+	if _, err := st.AddBlocklist(ctx, store.Blocklist{
+		MediaKind: "tv", SeriesID: &sid,
+		SourceTitle: "The.Show.S01.1080p.BluRay.x264-GRP",
+		Protocol:    "usenet", Reason: "unpack failed",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	n, err := svc.SearchSeries(ctx, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 || len(fe.reqs) != 1 {
+		t.Fatalf("want exactly 1 grab, got n=%d reqs=%d", n, len(fe.reqs))
+	}
+	if fe.reqs[0].DownloadURL != "ep1" {
+		t.Fatalf("with no packs left it must fall back per-episode, got %q", fe.reqs[0].DownloadURL)
 	}
 }
 
@@ -380,5 +737,56 @@ func TestFakeSearcherSatisfiesDetailedSearcher(t *testing.T) {
 	}
 	if len(errs) != 1 || errs[0].IndexerID != "3" || errs[0].Message != "timeout" {
 		t.Fatalf("indexerErrors = %+v, want the failing indexer named with its message", errs)
+	}
+}
+
+func TestActiveQueueCountsRowsPerSeries(t *testing.T) {
+	st := newStore(t)
+	ctx := context.Background()
+	sid, epIDs := seedSeries(t, st, true, 3)
+
+	// Two single-episode in-flight rows for this series, one of each active status.
+	if _, err := st.EnqueueGrab(ctx, store.QueueItem{
+		ClientItemID: "c1", MediaKind: "tv", SeriesID: &sid, EpisodeIDs: []int64{epIDs[0]}, Status: store.QueueGrabbed,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.EnqueueGrab(ctx, store.QueueItem{
+		ClientItemID: "c2", MediaKind: "tv", SeriesID: &sid, EpisodeIDs: []int64{epIDs[1]}, Status: store.QueueImporting,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// A season-pack row covering all 3 episodes in one grab: it must still count
+	// as a single in-flight row, not one per episode id.
+	if _, err := st.EnqueueGrab(ctx, store.QueueItem{
+		ClientItemID: "c4", MediaKind: "tv", SeriesID: &sid, EpisodeIDs: []int64{epIDs[0], epIDs[1], epIDs[2]}, Status: store.QueueGrabbed,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// A finished row (imported) for the same series must not count as in-flight.
+	if _, err := st.EnqueueGrab(ctx, store.QueueItem{
+		ClientItemID: "c5", MediaKind: "tv", SeriesID: &sid, EpisodeIDs: []int64{epIDs[2]}, Status: store.QueueImported,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// A movie row must not be counted against any series.
+	mid := seedMovie(t, st, true, true)
+	if _, err := st.EnqueueGrab(ctx, store.QueueItem{
+		ClientItemID: "c3", MediaKind: "movie", MovieID: &mid, Status: store.QueueGrabbed,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := NewService(st, &fakeSearcher{}, &fakeEnqueuer{}, nil)
+	_, _, inFlight, err := svc.activeQueue(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// c1 + c2 + c4 = 3 rows in flight; c5 (imported) must not add to the count.
+	if got := inFlight[sid]; got != 3 {
+		t.Fatalf("want 3 in flight for series %d, got %d (map=%v)", sid, got, inFlight)
+	}
+	if len(inFlight) != 1 {
+		t.Fatalf("only the series should appear, got %v", inFlight)
 	}
 }

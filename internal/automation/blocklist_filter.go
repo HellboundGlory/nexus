@@ -31,3 +31,8 @@ func (s *Service) ResearchEpisode(ctx context.Context, episodeID int64) error {
 	_, err := s.SearchEpisode(ctx, episodeID)
 	return err
 }
+
+func (s *Service) ResearchSeries(ctx context.Context, seriesID int64) error {
+	_, err := s.SearchSeries(ctx, seriesID)
+	return err
+}

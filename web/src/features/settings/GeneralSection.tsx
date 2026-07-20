@@ -10,6 +10,7 @@ const NUM_FIELDS: { key: keyof AutomationConfig; label: string }[] = [
   { key: "upgradeSearchIntervalHours", label: "Upgrade search interval (hours)" },
   { key: "upgradeSearchBatchSize", label: "Upgrade search batch size" },
   { key: "upgradeGrabCooldownHours", label: "Upgrade grab cooldown (hours)" },
+  { key: "maxConcurrentPerSeries", label: "Max concurrent downloads per series (0 = unlimited)" },
 ]
 const BOOL_FIELDS: { key: keyof AutomationConfig; label: string }[] = [
   { key: "rssSyncEnabled", label: "RSS sync enabled" },
@@ -29,7 +30,14 @@ export function GeneralSection() {
 
   const onSave = () => {
     if (!form) return
-    // Clamp non-positive numbers to keep parity with the server's defaulting.
+    // Strip non-positive numbers from the payload before PUT. For the six
+    // original fields this keeps parity with the server's defaulting: an
+    // omitted key decodes to 0, and Config() replaces any non-positive value
+    // with its default. maxConcurrentPerSeries is the deliberate exception —
+    // its omitted key also decodes to 0, but Config()'s clamp loop skips this
+    // field on purpose, so 0 survives as "unlimited" (the opposite of its
+    // default of 1). Stripping the key here IS the UI's off switch for the
+    // per-series budget; do not add a clamp clause for it.
     const clamped = { ...form }
     for (const f of NUM_FIELDS) {
       if ((clamped[f.key] as number) <= 0) delete (clamped as Record<string, unknown>)[f.key]

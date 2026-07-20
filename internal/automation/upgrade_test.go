@@ -2,6 +2,7 @@ package automation
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/hellboundg/nexus/internal/core/provider"
@@ -234,5 +235,139 @@ func TestUpgradeSweepTVEpisode(t *testing.T) {
 	}
 	if fs.lastQuery.Episode == nil {
 		t.Fatalf("TV upgrade search must be per-episode, got %+v", fs.lastQuery)
+	}
+}
+
+// seedUpgradableSeries seeds a monitored series whose every episode already has
+// a WEBDL-1080p(7) file — below hdProfile's cutoff of 9 — so every episode is a
+// valid upgrade target. Mirrors TestUpgradeSweepTVEpisode (upgrade_test.go:214).
+func seedUpgradableSeries(t *testing.T, st *store.Store, epCount int) (int64, []int64) {
+	t.Helper()
+	ctx := context.Background()
+	sid, epIDs := seedSeries(t, st, true, epCount)
+	for i := range epIDs {
+		id := epIDs[i]
+		if _, err := st.UpsertMediaFile(ctx, store.MediaFile{
+			MediaKind: "tv", EpisodeID: &id,
+			RelativePath: fmt.Sprintf("e%d.mkv", i+1), QualityID: 7,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return sid, epIDs
+}
+
+func TestUpgradeSweepStopsAtPerSeriesLimit(t *testing.T) {
+	st := newStore(t)
+	ctx := context.Background()
+	seedUpgradableSeries(t, st, 4)
+	fs := &fakeSearcher{releases: episodeReleases(4)}
+	fe := &fakeEnqueuer{}
+	svc := NewService(st, fs, fe, nil)
+	// Default config → limit 1.
+
+	n, err := svc.UpgradeSweep(ctx, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 || len(fe.reqs) != 1 {
+		t.Fatalf("upgrades must respect the per-series limit: n=%d reqs=%d", n, len(fe.reqs))
+	}
+}
+
+// Upgrades and missing-episode grabs share ONE budget.
+func TestUpgradeSweepSharesBudgetWithInFlightGrab(t *testing.T) {
+	st := newStore(t)
+	ctx := context.Background()
+	sid, epIDs := seedUpgradableSeries(t, st, 4)
+	if _, err := st.EnqueueGrab(ctx, store.QueueItem{
+		MediaKind: "tv", SeriesID: &sid, EpisodeIDs: []int64{epIDs[0]}, Status: store.QueueGrabbed,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	fs := &fakeSearcher{releases: episodeReleases(4)}
+	fe := &fakeEnqueuer{}
+	svc := NewService(st, fs, fe, nil)
+
+	n, err := svc.UpgradeSweep(ctx, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 || len(fe.reqs) != 0 {
+		t.Fatalf("an in-flight grab must block upgrades for the same series: n=%d reqs=%d", n, len(fe.reqs))
+	}
+}
+
+// TestUpgradeSweepUngatedWhenLimitZero is the controller-addendum off-switch
+// test: MaxConcurrentPerSeries = 0 must disable the gate entirely, so all 4
+// upgradable episodes get grabbed. Without this test a mistaken clamp of
+// limit <= 0 back to 1 would ship silently.
+func TestUpgradeSweepUngatedWhenLimitZero(t *testing.T) {
+	st := newStore(t)
+	ctx := context.Background()
+	seedUpgradableSeries(t, st, 4)
+	fs := &fakeSearcher{releases: episodeReleases(4)}
+	fe := &fakeEnqueuer{}
+	svc := NewService(st, fs, fe, nil)
+	c := DefaultConfig()
+	c.MaxConcurrentPerSeries = 0
+	if err := svc.SetConfig(ctx, c); err != nil {
+		t.Fatal(err)
+	}
+
+	n, err := svc.UpgradeSweep(ctx, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 4 || len(fe.reqs) != 4 {
+		t.Fatalf("limit 0 disables the gate, want all 4 upgraded: n=%d reqs=%d", n, len(fe.reqs))
+	}
+}
+
+// TestUpgradeSweepIgnoresOtherSeriesInFlight is the controller-addendum
+// cross-series isolation test: a DIFFERENT series (distinct TMDBID, since
+// seedSeries hardcodes TMDBID 7 and download_queue.series_id has a real FK to
+// series(id)) saturated with in-flight rows must not consume this series'
+// budget. Each extra EnqueueGrab row needs a distinct ClientItemID or the
+// UNIQUE(download_client_id, client_item_id) constraint fails the insert.
+func TestUpgradeSweepIgnoresOtherSeriesInFlight(t *testing.T) {
+	st := newStore(t)
+	ctx := context.Background()
+	sid, _ := seedUpgradableSeries(t, st, 4)
+
+	otherID, err := st.CreateSeries(ctx, store.Series{TMDBID: 999, Title: "Other Show", Monitored: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertSeason(ctx, store.Season{SeriesID: otherID, SeasonNumber: 1, Monitored: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertEpisode(ctx, store.Episode{SeriesID: otherID, SeasonNumber: 1, EpisodeNumber: 1, Monitored: true}); err != nil {
+		t.Fatal(err)
+	}
+	otherEps, err := st.ListEpisodes(ctx, otherID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 5; i++ {
+		if _, err := st.EnqueueGrab(ctx, store.QueueItem{
+			ClientItemID: fmt.Sprintf("other-%d", i),
+			MediaKind:    "tv", SeriesID: &otherID, EpisodeIDs: []int64{otherEps[0].ID}, Status: store.QueueGrabbed,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	fs := &fakeSearcher{releases: episodeReleases(4)}
+	fe := &fakeEnqueuer{}
+	svc := NewService(st, fs, fe, nil)
+	_ = sid
+
+	n, err := svc.UpgradeSweep(ctx, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 || len(fe.reqs) != 1 {
+		t.Fatalf("another series' in-flight rows must not affect this series' upgrade budget: n=%d reqs=%d", n, len(fe.reqs))
 	}
 }

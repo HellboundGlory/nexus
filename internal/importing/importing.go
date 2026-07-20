@@ -67,6 +67,7 @@ func NewService(st *store.Store, grab Grabber, q QueueReader, bus *events.Bus) *
 type Researcher interface {
 	ResearchMovie(ctx context.Context, movieID int64) error
 	ResearchEpisode(ctx context.Context, episodeID int64) error
+	ResearchSeries(ctx context.Context, seriesID int64) error
 }
 
 func (s *Service) SetResearcher(r Researcher) { s.researcher = r }

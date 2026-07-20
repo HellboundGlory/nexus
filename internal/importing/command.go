@@ -2,6 +2,7 @@ package importing
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 
 	"github.com/hellboundg/nexus/internal/core/command"
@@ -11,6 +12,16 @@ import (
 
 // ImportCompleted imports every grabbed queue row whose client item is
 // completed, and handles rows whose client item has failed (blocklist + retry).
+// After a TV import actually lands — the queue row is gone, because ImportItem
+// deletes it on success — the series is re-searched, so the next episode is
+// grabbed as soon as the slot frees rather than waiting for the next scheduled
+// sweep. A SOFT import failure (e.g. no video files found, incomplete import)
+// routes through fail(), which sets the row to QueueFailed and retains it
+// instead of deleting it, so it does NOT trigger a re-search: the release was
+// never blocklisted and the episode is still missing, so an immediate
+// re-search could just re-grab the same failing release. Series ids are
+// collected and researched once per tick — firing per row would launch
+// several concurrent searches racing for the same freed slot.
 func (s *Service) ImportCompleted(ctx context.Context) error {
 	rows, err := s.store.QueueByStatus(ctx, store.QueueGrabbed)
 	if err != nil {
@@ -20,6 +31,8 @@ func (s *Service) ImportCompleted(ctx context.Context) error {
 		return nil
 	}
 	items := s.queue.Queue(ctx).Items
+	var imported []int64
+	seen := map[int64]struct{}{}
 	for _, row := range rows {
 		it, ok := matchItem(items, row)
 		if !ok {
@@ -30,13 +43,40 @@ func (s *Service) ImportCompleted(ctx context.Context) error {
 			if err := s.ImportItem(ctx, row.ID); err != nil {
 				return err
 			}
+			// A successful import deletes the queue row; a soft failure
+			// (fail()) retains it as QueueFailed. Gate the re-search on the
+			// row actually being gone rather than on err == nil, since
+			// fail() itself returns nil.
+			if _, gerr := s.store.GetQueueItem(ctx, row.ID); errors.Is(gerr, store.ErrNotFound) {
+				if row.SeriesID != nil {
+					if _, dup := seen[*row.SeriesID]; !dup {
+						seen[*row.SeriesID] = struct{}{}
+						imported = append(imported, *row.SeriesID)
+					}
+				}
+			}
 		case provider.StatusFailed:
 			if err := s.handleFailed(ctx, row, it); err != nil {
 				return err
 			}
 		}
 	}
+	s.researchImportedSeries(ctx, imported)
 	return nil
+}
+
+// researchImportedSeries re-searches each series that just had an import land,
+// so the freed concurrency slot is used immediately. Failures are logged and
+// swallowed: an import must never fail because a follow-up search did.
+func (s *Service) researchImportedSeries(ctx context.Context, seriesIDs []int64) {
+	if s.researcher == nil {
+		return
+	}
+	for _, id := range seriesIDs {
+		if err := s.researcher.ResearchSeries(ctx, id); err != nil {
+			slog.Warn("importing: re-search after import failed", "seriesId", id, "err", err)
+		}
+	}
 }
 
 // handleFailed records the failure, blocklists the release (scoped to the media
@@ -70,6 +110,11 @@ func (s *Service) handleFailed(ctx context.Context, row store.QueueItem, it prov
 
 // researchAfterFailure triggers a fresh search for the failed target so
 // automation can grab an alternative release, now that this one is blocklisted.
+// TV rows re-search the whole SERIES rather than each episode: for a season pack
+// the per-episode variant skipped straight to per-episode grabbing, so the
+// next-best pack was never tried. Re-running the series search re-enters the
+// season-pack branch with the failed pack blocklisted, which is what makes pack
+// exhaustion work.
 func (s *Service) researchAfterFailure(ctx context.Context, row store.QueueItem) {
 	if s.researcher == nil {
 		return
@@ -80,9 +125,9 @@ func (s *Service) researchAfterFailure(ctx context.Context, row store.QueueItem)
 		}
 		return
 	}
-	for _, epID := range row.EpisodeIDs {
-		if err := s.researcher.ResearchEpisode(ctx, epID); err != nil {
-			slog.Warn("importing: re-search after failure failed", "episodeId", epID, "err", err)
+	if row.SeriesID != nil {
+		if err := s.researcher.ResearchSeries(ctx, *row.SeriesID); err != nil {
+			slog.Warn("importing: re-search after failure failed", "seriesId", *row.SeriesID, "err", err)
 		}
 	}
 }
