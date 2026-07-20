@@ -95,9 +95,10 @@ func buildLibraryIndex(movies []store.Movie, series []store.Series) *libraryInde
 	}
 	for i := range series {
 		se := &series[i]
-		if !se.Monitored {
-			continue
-		}
+		// No se.Monitored filter here: episode-level monitoring governs (see
+		// searchSeries), and RSSSync hands this only the series that still have
+		// monitored episodes. rssPlaceTV re-checks each episode's own flag, so a
+		// series that slips through matches releases but grabs nothing.
 		if se.TMDBID != 0 {
 			idx.seriesByTMDB[se.TMDBID] = se
 		}
@@ -240,7 +241,21 @@ func (s *Service) RSSSync(ctx context.Context) (RSSResult, error) {
 	if err != nil {
 		return res, err
 	}
-	idx := buildLibraryIndex(movies, series)
+	// Match releases only against series that still want something. The series'
+	// own monitored flag is NOT the test (see searchSeries) -- episode-level
+	// monitoring governs -- but a series with no monitored episodes is dropped
+	// here so it never enters the title-matching index.
+	eligible := series[:0:0]
+	for _, se := range series {
+		hasMon, err := s.store.HasMonitoredEpisodes(ctx, se.ID)
+		if err != nil {
+			return res, err
+		}
+		if hasMon {
+			eligible = append(eligible, se)
+		}
+	}
+	idx := buildLibraryIndex(movies, eligible)
 
 	// Bucket releases by resolved target.
 	movieRels := map[int64][]provider.Release{}

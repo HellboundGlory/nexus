@@ -156,7 +156,13 @@ func (s *Service) upgradeSweep(ctx context.Context, batch int) (int, error) {
 		if processed >= batch {
 			return total, nil
 		}
-		if !se.Monitored {
+		// Episode-level monitoring governs (see searchSeries), but skip a series
+		// with nothing monitored rather than load its episode list to upgrade zero.
+		hasMon, err := s.store.HasMonitoredEpisodes(ctx, se.ID)
+		if err != nil {
+			return total, err
+		}
+		if !hasMon {
 			continue
 		}
 		profile, ok, err := s.profileFor(ctx, se.QualityProfileID)

@@ -307,6 +307,22 @@ func (s *Store) SetSeriesEpisodesMonitored(ctx context.Context, seriesID int64, 
 	return err
 }
 
+// HasMonitoredEpisodes reports whether the series has at least one monitored
+// episode. Automation's sweeps use it instead of the series' own monitored flag:
+// a series row can be unmonitored while individual episodes inside it are
+// monitored, and those episodes are still wanted. Kept as an EXISTS so a sweep
+// can skip a series with nothing monitored without loading its episode list —
+// a long-running show carries well over a thousand episode rows.
+func (s *Store) HasMonitoredEpisodes(ctx context.Context, seriesID int64) (bool, error) {
+	var found int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT EXISTS(SELECT 1 FROM episodes WHERE series_id=? AND monitored=1)`, seriesID).Scan(&found)
+	if err != nil {
+		return false, err
+	}
+	return found == 1, nil
+}
+
 // CalendarEpisode is an episode joined to its parent series title, for the
 // calendar view (episodes carry no series title of their own).
 type CalendarEpisode struct {
