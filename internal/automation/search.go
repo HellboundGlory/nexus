@@ -185,9 +185,15 @@ func (s *Service) searchSeries(ctx context.Context, seriesID int64) (int, error)
 		if !bud.allows() {
 			break
 		}
-		if !sn.Monitored {
-			continue
-		}
+		// Deliberately NOT gated on sn.Monitored: a season row can be
+		// unmonitored while individual episodes inside it are monitored, which
+		// is exactly what "unmonitor the season, then tick a few episodes"
+		// leaves behind — SetSeasonMonitored(false) cascades every episode off,
+		// and re-monitoring one episode never touches the season row again.
+		// Skipping such a season made those episodes unreachable to the sweep
+		// while interactive search still found them. searchSeason filters on
+		// each episode's own Monitored flag, which is the source of truth here
+		// and matches what the RSS path already does.
 		n, err := s.searchSeason(ctx, se, sn.SeasonNumber, eps, profile, activeEps, bud)
 		if err != nil {
 			return total, err
@@ -238,8 +244,13 @@ func (s *Service) searchSeasonEntry(ctx context.Context, seriesID int64, seasonN
 // back to per-episode searches. eps is the full episode list for the series.
 func (s *Service) searchSeason(ctx context.Context, se *store.Series, seasonNumber int, eps []store.Episode, profile store.QualityProfile, activeEps map[int64]struct{}, bud *budget) (int, error) {
 	var monitored, missing []store.Episode
+	seasonTotal := 0
 	for _, e := range eps {
-		if e.SeasonNumber != seasonNumber || !e.Monitored {
+		if e.SeasonNumber != seasonNumber {
+			continue
+		}
+		seasonTotal++
+		if !e.Monitored {
 			continue
 		}
 		monitored = append(monitored, e)
@@ -257,8 +268,12 @@ func (s *Service) searchSeason(ctx context.Context, se *store.Series, seasonNumb
 	if !bud.allows() {
 		return 0, nil
 	}
-	// Fully missing → try a season pack first.
-	if len(missing) == len(monitored) {
+	// Fully missing AND fully monitored → try a season pack first. Both halves
+	// matter: a pack covers the WHOLE season, so grabbing one to satisfy a
+	// partially-monitored season would download every episode in it to get the
+	// few that were wanted. len(missing) == len(monitored) alone cannot tell
+	// "3 of 3" from "3 of 80", because monitored is already filtered.
+	if len(missing) == len(monitored) && len(monitored) == seasonTotal {
 		releases, err := s.search.Search(ctx, tvQuery(se, seasonNumber, nil))
 		if err != nil {
 			slog.Warn("automation: season search had indexer errors", "seriesId", se.ID, "season", seasonNumber, "err", err)

@@ -790,3 +790,91 @@ func TestActiveQueueCountsRowsPerSeries(t *testing.T) {
 		t.Fatalf("only the series should appear, got %v", inFlight)
 	}
 }
+
+// unmonitorSeasonRow clears the season's own monitored flag WITHOUT cascading to
+// its episodes, which is the state the UI leaves behind: SetSeasonMonitored(false)
+// cascades every episode off, and re-monitoring individual episodes
+// (media.Service.SetEpisodeMonitored) never touches the season row again.
+func unmonitorSeasonRow(t *testing.T, st *store.Store, seriesID int64, seasonNumber int) {
+	t.Helper()
+	ctx := context.Background()
+	seasons, err := st.ListSeasons(ctx, seriesID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, sn := range seasons {
+		if sn.SeasonNumber == seasonNumber {
+			if err := st.SetSeasonMonitored(ctx, sn.ID, false); err != nil {
+				t.Fatal(err)
+			}
+			return
+		}
+	}
+	t.Fatalf("season %d not found for series %d", seasonNumber, seriesID)
+}
+
+// A season row can be unmonitored while individual episodes inside it are
+// monitored — that is exactly what "unmonitor the season, then tick 3 episodes"
+// produces. The missing sweep must still search those episodes; skipping the
+// whole season is what made a partially-monitored show grab nothing at all.
+func TestSearchSeriesSearchesMonitoredEpisodesInUnmonitoredSeason(t *testing.T) {
+	st := newStore(t)
+	ctx := context.Background()
+	sid, epIDs := seedSeries(t, st, true, 5)
+	// Keep only episodes 1-3 monitored, then clear the season's own flag.
+	for _, id := range epIDs[3:] {
+		if err := st.SetEpisodeMonitored(ctx, id, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	unmonitorSeasonRow(t, st, sid, 1)
+
+	fs := &fakeSearcher{releases: episodeReleases(5)}
+	fe := &fakeEnqueuer{}
+	svc := NewService(st, fs, fe, nil)
+
+	n, err := svc.SearchSeries(ctx, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 || len(fe.reqs) != 1 {
+		t.Fatalf("monitored episodes in an unmonitored season must still be searched: n=%d reqs=%d", n, len(fe.reqs))
+	}
+}
+
+// A season pack covers the WHOLE season, so it may only be grabbed when the
+// whole season is wanted. With 3 of 5 episodes monitored, grabbing the pack
+// would download every episode of the season to satisfy three.
+func TestSearchSeasonSkipsPackWhenSeasonOnlyPartiallyMonitored(t *testing.T) {
+	st := newStore(t)
+	ctx := context.Background()
+	sid, epIDs := seedSeries(t, st, true, 5)
+	for _, id := range epIDs[3:] {
+		if err := st.SetEpisodeMonitored(ctx, id, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	fs := &fakeSearcher{releases: append(
+		[]provider.Release{{
+			Title: "The.Show.S01.1080p.BluRay.x264-GRP", DownloadURL: "pack", Protocol: provider.ProtocolUsenet,
+		}},
+		episodeReleases(5)...,
+	)}
+	fe := &fakeEnqueuer{}
+	svc := NewService(st, fs, fe, nil)
+
+	n, err := svc.SearchSeason(ctx, sid, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 || len(fe.reqs) != 1 {
+		t.Fatalf("want exactly 1 grab, got n=%d reqs=%d", n, len(fe.reqs))
+	}
+	if fe.reqs[0].DownloadURL == "pack" {
+		t.Fatal("a partially-monitored season must not grab a full-season pack")
+	}
+	if len(fe.reqs[0].EpisodeIDs) != 1 {
+		t.Fatalf("want a single-episode grab, got EpisodeIDs=%v", fe.reqs[0].EpisodeIDs)
+	}
+}
