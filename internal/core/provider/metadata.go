@@ -28,6 +28,14 @@ type SeasonMetadata struct {
 	Episodes     []EpisodeMetadata
 }
 
+// SeriesAlias is an alternative title for a series. Type is free-form provider
+// metadata ("season 1", "alternative spelling") and is not interpreted.
+type SeriesAlias struct {
+	Title   string
+	Country string
+	Type    string
+}
+
 // SeriesMetadata is a full TV detail lookup, including seasons and episodes.
 type SeriesMetadata struct {
 	TMDBID     int
@@ -38,6 +46,7 @@ type SeriesMetadata struct {
 	PosterURL  string
 	FanartURL  string
 	Seasons    []SeasonMetadata
+	Aliases    []SeriesAlias
 }
 
 // MovieMetadata is a full movie detail lookup.

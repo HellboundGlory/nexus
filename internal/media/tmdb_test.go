@@ -100,3 +100,54 @@ func TestTMDBServerError(t *testing.T) {
 		t.Fatalf("want ErrProviderUnavailable got %v", err)
 	}
 }
+
+func TestTVDetailsFetchesAlternativeTitles(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/tv/60572":
+			w.Write([]byte(`{"id":60572,"name":"Pokémon","seasons":[]}`))
+		case "/tv/60572/alternative_titles":
+			w.Write([]byte(`{"id":60572,"results":[
+				{"iso_3166_1":"US","title":"Pokémon: Indigo League","type":"season 1"},
+				{"iso_3166_1":"JP","title":"Pocket Monsters","type":""}]}`))
+		default:
+			t.Errorf("unexpected path %q", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	md, err := newTMDB("k", srv.URL, srv.Client()).TVDetails(context.Background(), 60572)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(md.Aliases) != 2 {
+		t.Fatalf("want 2 aliases, got %+v", md.Aliases)
+	}
+	if md.Aliases[0].Title != "Pokémon: Indigo League" || md.Aliases[0].Country != "US" || md.Aliases[0].Type != "season 1" {
+		t.Fatalf("alias fields not mapped: %+v", md.Aliases[0])
+	}
+}
+
+// An alias-endpoint failure must not fail the whole detail fetch: the series is
+// still usable, it just has no aliases until the next refresh.
+func TestTVDetailsSurvivesAlternativeTitlesFailure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/tv/60572/alternative_titles" {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.Write([]byte(`{"id":60572,"name":"Pokémon","seasons":[]}`))
+	}))
+	defer srv.Close()
+
+	md, err := newTMDB("k", srv.URL, srv.Client()).TVDetails(context.Background(), 60572)
+	if err != nil {
+		t.Fatalf("alias failure must not fail TVDetails: %v", err)
+	}
+	if md.Title != "Pokémon" {
+		t.Fatalf("series metadata should still be populated, got %+v", md)
+	}
+	if len(md.Aliases) != 0 {
+		t.Fatalf("want no aliases on failure, got %+v", md.Aliases)
+	}
+}
