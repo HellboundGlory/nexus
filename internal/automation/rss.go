@@ -272,7 +272,7 @@ func (s *Service) RSSSync(ctx context.Context) (RSSResult, error) {
 		}
 	}
 
-	activeMovies, activeEps, _, err := s.activeQueue(ctx)
+	activeMovies, activeEps, inFlight, err := s.activeQueue(ctx)
 	if err != nil {
 		return res, err
 	}
@@ -316,6 +316,10 @@ func (s *Service) RSSSync(ctx context.Context) (RSSResult, error) {
 		}
 	}
 
+	cfg, err := s.Config(ctx)
+	if err != nil {
+		return res, err
+	}
 	// TV: per series, rank the bucket once, then place season packs / episodes.
 	for seriesID, rels := range tvRels {
 		se := tvTargets[seriesID]
@@ -331,7 +335,8 @@ func (s *Service) RSSSync(ctx context.Context) (RSSResult, error) {
 			return res, err
 		}
 		ranked := Decide(rels, provider.KindTV, profile)
-		n, err := s.rssPlaceTV(ctx, se, eps, ranked, activeEps)
+		bud := newBudget(cfg.MaxConcurrentPerSeries, inFlight[seriesID])
+		n, err := s.rssPlaceTV(ctx, se, eps, ranked, activeEps, bud)
 		if err != nil {
 			return res, err
 		}
@@ -347,7 +352,7 @@ func (s *Service) RSSSync(ctx context.Context) (RSSResult, error) {
 // (grabbed with all its missing episode ids), then per-episode for any still-
 // unhandled missing episode. Mirrors the wanted/missing season strategy but over
 // an already-fetched candidate pool.
-func (s *Service) rssPlaceTV(ctx context.Context, se *store.Series, eps []store.Episode, ranked []Candidate, activeEps map[int64]struct{}) (int, error) {
+func (s *Service) rssPlaceTV(ctx context.Context, se *store.Series, eps []store.Episode, ranked []Candidate, activeEps map[int64]struct{}, bud *budget) (int, error) {
 	blocked, err := s.store.BlocklistedTitles(ctx, nil, &se.ID)
 	if err != nil {
 		slog.Warn("automation: blocklist lookup failed", "seriesId", se.ID, "err", err)
@@ -374,6 +379,9 @@ func (s *Service) rssPlaceTV(ctx context.Context, se *store.Series, eps []store.
 
 	// Season packs first, for fully-missing monitored seasons.
 	for season, missing := range missingBySeason {
+		if !bud.allows() {
+			break
+		}
 		if len(missing) != monitoredBySeason[season] {
 			continue
 		}
@@ -395,6 +403,7 @@ func (s *Service) rssPlaceTV(ctx context.Context, se *store.Series, eps []store.
 		}
 		if ok {
 			grabbed++
+			bud.take()
 			for _, e := range missing {
 				handled[e.ID] = struct{}{}
 			}
@@ -404,6 +413,9 @@ func (s *Service) rssPlaceTV(ctx context.Context, se *store.Series, eps []store.
 	// Per-episode for anything not covered by a grabbed pack.
 	for season, missing := range missingBySeason {
 		for _, e := range missing {
+			if !bud.allows() {
+				break
+			}
 			if _, done := handled[e.ID]; done {
 				continue
 			}
@@ -438,6 +450,7 @@ func (s *Service) rssPlaceTV(ctx context.Context, se *store.Series, eps []store.
 			}
 			if ok {
 				grabbed++
+				bud.take()
 				for _, m := range missing {
 					if containsInt(chosen.Parsed.Episodes, m.EpisodeNumber) {
 						handled[m.ID] = struct{}{}
