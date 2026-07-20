@@ -212,14 +212,20 @@ release yields `"The Pendant That Starts It All Part 1"`; no overlap, rejected. 
 
 ## 5. Application points
 
-Both checks apply at the three TV grab paths. This project has been bitten three times by
-fixing one site and missing the others, so the sites are enumerated explicitly:
+The checks apply at the three TV grab paths. This project has been bitten three times by
+fixing one site and missing the others, so the sites are enumerated explicitly, along with
+which checks each one runs:
 
-| Site | File |
-|---|---|
-| `searchEpisode` | `internal/automation/search.go` |
-| `searchSeason` pack branch | `internal/automation/search.go` |
-| `upgradeEpisode` | `internal/automation/upgrade.go` |
+| Site | File | Series match | Episode-title contradiction |
+|---|---|---|---|
+| `searchEpisode` | `internal/automation/search.go` | yes | yes |
+| `searchSeason` pack branch | `internal/automation/search.go` | yes | **no** — see below |
+| `upgradeEpisode` | `internal/automation/upgrade.go` | yes | yes |
+
+The season-pack branch takes **no** episode-title check. A pack covers a whole season and
+carries no single episode title to compare against; its release name has no `S##E##`
+marker, so `EpisodeTitle` is empty and the check would be an unconditional no-op. Stating
+it explicitly so its absence reads as deliberate rather than as a missed site.
 
 `rssPlaceTV` (`internal/automation/rss.go`) already resolves the series via `matchSeries`
 and needs neither check. It should, however, benefit from aliases: `matchSeries`'s
