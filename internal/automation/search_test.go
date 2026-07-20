@@ -656,6 +656,74 @@ func TestSearchSeasonPackRespectsBudgetWhenAlreadyExhausted(t *testing.T) {
 	}
 }
 
+func TestSearchSeasonTriesNextPackWhenFirstIsBlocklisted(t *testing.T) {
+	st := newStore(t)
+	ctx := context.Background()
+	sid, _ := seedSeries(t, st, true, 3)
+	fs := &fakeSearcher{releases: []provider.Release{
+		{Title: "The.Show.S01.1080p.BluRay.x264-GRP", DownloadURL: "pack1", Protocol: provider.ProtocolUsenet},
+		{Title: "The.Show.S01.1080p.WEB-DL.x264-GRP", DownloadURL: "pack2", Protocol: provider.ProtocolUsenet},
+		{Title: "The.Show.S01E01.1080p.BluRay.x264-GRP", DownloadURL: "ep1", Protocol: provider.ProtocolUsenet},
+	}}
+	fe := &fakeEnqueuer{}
+	svc := NewService(st, fs, fe, nil)
+
+	// The first pack has already failed and been blocklisted, exactly as
+	// handleFailed would leave things before calling ResearchSeries.
+	if _, err := st.AddBlocklist(ctx, store.Blocklist{
+		MediaKind: "tv", SeriesID: &sid,
+		SourceTitle: "The.Show.S01.1080p.BluRay.x264-GRP",
+		Protocol:    "usenet", Reason: "unpack failed",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	n, err := svc.SearchSeries(ctx, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 || len(fe.reqs) != 1 {
+		t.Fatalf("want exactly 1 grab, got n=%d reqs=%d", n, len(fe.reqs))
+	}
+	if fe.reqs[0].DownloadURL != "pack2" {
+		t.Fatalf("must try the next PACK before per-episode, got %q", fe.reqs[0].DownloadURL)
+	}
+	if len(fe.reqs[0].EpisodeIDs) != 3 {
+		t.Fatalf("a pack grab covers every missing episode, got %v", fe.reqs[0].EpisodeIDs)
+	}
+}
+
+func TestSearchSeasonFallsBackToEpisodesWhenPacksExhausted(t *testing.T) {
+	st := newStore(t)
+	ctx := context.Background()
+	sid, _ := seedSeries(t, st, true, 3)
+	fs := &fakeSearcher{releases: []provider.Release{
+		{Title: "The.Show.S01.1080p.BluRay.x264-GRP", DownloadURL: "pack1", Protocol: provider.ProtocolUsenet},
+		{Title: "The.Show.S01E01.1080p.BluRay.x264-GRP", DownloadURL: "ep1", Protocol: provider.ProtocolUsenet},
+	}}
+	fe := &fakeEnqueuer{}
+	svc := NewService(st, fs, fe, nil)
+
+	if _, err := st.AddBlocklist(ctx, store.Blocklist{
+		MediaKind: "tv", SeriesID: &sid,
+		SourceTitle: "The.Show.S01.1080p.BluRay.x264-GRP",
+		Protocol:    "usenet", Reason: "unpack failed",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	n, err := svc.SearchSeries(ctx, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 || len(fe.reqs) != 1 {
+		t.Fatalf("want exactly 1 grab, got n=%d reqs=%d", n, len(fe.reqs))
+	}
+	if fe.reqs[0].DownloadURL != "ep1" {
+		t.Fatalf("with no packs left it must fall back per-episode, got %q", fe.reqs[0].DownloadURL)
+	}
+}
+
 func TestFakeSearcherSatisfiesDetailedSearcher(t *testing.T) {
 	f := &fakeSearcher{
 		releases:      []provider.Release{{Title: "Some.Movie.2019.1080p.WEB-DL", IndexerID: "1"}},
