@@ -388,7 +388,7 @@ func TestActiveQueueCountsRowsPerSeries(t *testing.T) {
 	ctx := context.Background()
 	sid, epIDs := seedSeries(t, st, true, 3)
 
-	// Two in-flight rows for this series, one of each active status.
+	// Two single-episode in-flight rows for this series, one of each active status.
 	if _, err := st.EnqueueGrab(ctx, store.QueueItem{
 		ClientItemID: "c1", MediaKind: "tv", SeriesID: &sid, EpisodeIDs: []int64{epIDs[0]}, Status: store.QueueGrabbed,
 	}); err != nil {
@@ -396,6 +396,19 @@ func TestActiveQueueCountsRowsPerSeries(t *testing.T) {
 	}
 	if _, err := st.EnqueueGrab(ctx, store.QueueItem{
 		ClientItemID: "c2", MediaKind: "tv", SeriesID: &sid, EpisodeIDs: []int64{epIDs[1]}, Status: store.QueueImporting,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// A season-pack row covering all 3 episodes in one grab: it must still count
+	// as a single in-flight row, not one per episode id.
+	if _, err := st.EnqueueGrab(ctx, store.QueueItem{
+		ClientItemID: "c4", MediaKind: "tv", SeriesID: &sid, EpisodeIDs: []int64{epIDs[0], epIDs[1], epIDs[2]}, Status: store.QueueGrabbed,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// A finished row (imported) for the same series must not count as in-flight.
+	if _, err := st.EnqueueGrab(ctx, store.QueueItem{
+		ClientItemID: "c5", MediaKind: "tv", SeriesID: &sid, EpisodeIDs: []int64{epIDs[2]}, Status: store.QueueImported,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -412,8 +425,9 @@ func TestActiveQueueCountsRowsPerSeries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := inFlight[sid]; got != 2 {
-		t.Fatalf("want 2 in flight for series %d, got %d (map=%v)", sid, got, inFlight)
+	// c1 + c2 + c4 = 3 rows in flight; c5 (imported) must not add to the count.
+	if got := inFlight[sid]; got != 3 {
+		t.Fatalf("want 3 in flight for series %d, got %d (map=%v)", sid, got, inFlight)
 	}
 	if len(inFlight) != 1 {
 		t.Fatalf("only the series should appear, got %v", inFlight)
