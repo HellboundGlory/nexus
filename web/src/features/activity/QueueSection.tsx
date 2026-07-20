@@ -1,10 +1,13 @@
 // web/src/features/activity/QueueSection.tsx
+import { useState } from "react"
 import { ApiError } from "@/lib/api"
 import { useToast } from "@/lib/toast"
 import { relativeTime } from "@/lib/time"
 import { useMovies, useSeries } from "@/features/library/api"
 import { useQualityDefinitions } from "@/features/settings/qualityApi"
-import { useQueue, useImportItem, useRemoveQueueItem } from "./api"
+import { useQueue, useImportItem, useRemoveQueueItem, useClearQueue } from "./api"
+import { RemoveQueueItemDialog } from "./RemoveQueueItemDialog"
+import { ClearConfirmDialog } from "./ClearConfirmDialog"
 import {
   movieTitleMap, seriesTitleMap, resolveTitle, qualityName, queueRowDisplay, type Tone,
 } from "./resolve"
@@ -23,13 +26,19 @@ export function QueueSection() {
   const defs = useQualityDefinitions()
   const importItem = useImportItem()
   const removeItem = useRemoveQueueItem()
+  const clearQueue = useClearQueue()
   const { toast } = useToast()
+
+  const [removeTarget, setRemoveTarget] = useState<{ id: number; title: string } | null>(null)
+  const [clearOpen, setClearOpen] = useState(false)
+  // Set when a non-forced clear is refused; showing it turns the dialog into
+  // the "Clear anyway" state. Force is never offered until it is the answer.
+  const [clearWarning, setClearWarning] = useState<string | null>(null)
 
   if (queue.isLoading) return <div className="p-6 text-sm text-[var(--color-muted)]">Loading queue…</div>
   if (queue.isError) return <div className="p-6 text-sm text-[var(--color-warn)]">Failed to load queue.</div>
 
   const rows = queue.data ?? []
-  if (rows.length === 0) return <div className="p-6 text-sm text-[var(--color-muted)]">Queue is empty.</div>
 
   const movieMap = movieTitleMap(movies.data)
   const seriesMap = seriesTitleMap(series.data)
@@ -40,16 +49,65 @@ export function QueueSection() {
       onError: (e) => toast(e instanceof ApiError ? e.message : "Import failed", { variant: "error" }),
     })
 
-  const onRemove = (id: number) => {
-    if (!window.confirm("Remove this item from the queue?")) return
-    removeItem.mutate(id, {
-      onSuccess: () => toast("Removed from queue"),
-      onError: (e) => toast(e instanceof ApiError ? e.message : "Remove failed", { variant: "error" }),
-    })
+  const onRemove = (opts: { removeFromClient: boolean; blocklist: boolean }) => {
+    if (!removeTarget) return
+    removeItem.mutate(
+      { id: removeTarget.id, ...opts },
+      {
+        onSuccess: () => {
+          setRemoveTarget(null)
+          toast("Removed from queue")
+        },
+        onError: (e) => toast(e instanceof ApiError ? e.message : "Remove failed", { variant: "error" }),
+      },
+    )
+  }
+
+  const onClear = (force: boolean) => {
+    clearQueue.mutate(
+      { force },
+      {
+        onSuccess: (res) => {
+          setClearOpen(false)
+          setClearWarning(null)
+          const failed = res.clientErrors?.length ?? 0
+          toast(
+            failed > 0
+              ? `Queue cleared (${res.removed} items). ${failed} download client(s) could not be reached; their downloads may still be running.`
+              : `Queue cleared (${res.removed} items)`,
+            failed > 0 ? { variant: "error" } : undefined,
+          )
+        },
+        onError: (e) => {
+          // A refused clear keeps the dialog open and offers the override.
+          if (e instanceof ApiError && e.status === 503) {
+            setClearWarning(e.message)
+            return
+          }
+          setClearOpen(false)
+          toast(e instanceof ApiError ? e.message : "Clear failed", { variant: "error" })
+        },
+      },
+    )
   }
 
   return (
     <div className="p-6">
+      <div className="mb-3 flex items-center justify-between">
+        <span className="text-xs text-[var(--color-muted)]">{rows.length} items</span>
+        {rows.length > 0 ? (
+          <button
+            onClick={() => { setClearWarning(null); setClearOpen(true) }}
+            className="rounded border border-[var(--color-border)] px-2 py-1 text-xs text-[var(--color-warn)] hover:border-[var(--color-warn)]"
+          >
+            Clear queue
+          </button>
+        ) : null}
+      </div>
+
+      {rows.length === 0 ? (
+        <div className="text-sm text-[var(--color-muted)]">Queue is empty.</div>
+      ) : (
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-[var(--color-border)] text-left text-xs uppercase tracking-wide text-[var(--color-muted)]">
@@ -115,7 +173,7 @@ export function QueueSection() {
                     </button>
                   )}
                   <button
-                    onClick={() => onRemove(r.id)}
+                    onClick={() => setRemoveTarget({ id: r.id, title: r.sourceTitle || title })}
                     className="rounded border border-[var(--color-border)] px-2 py-1 text-xs text-[var(--color-warn)] hover:border-[var(--color-warn)]"
                   >
                     Remove
@@ -126,6 +184,23 @@ export function QueueSection() {
           })}
         </tbody>
       </table>
+      )}
+
+      <RemoveQueueItemDialog
+        open={removeTarget !== null}
+        onOpenChange={(o) => { if (!o) setRemoveTarget(null) }}
+        title={removeTarget?.title ?? ""}
+        onConfirm={onRemove}
+      />
+      <ClearConfirmDialog
+        open={clearOpen}
+        onOpenChange={(o) => { setClearOpen(o); if (!o) setClearWarning(null) }}
+        title="Clear queue?"
+        body={`This removes all ${rows.length} queued items and cancels their downloads.`}
+        warning={clearWarning}
+        confirmLabel={clearWarning ? "Clear anyway" : "Clear"}
+        onConfirm={() => onClear(clearWarning !== null)}
+      />
     </div>
   )
 }
