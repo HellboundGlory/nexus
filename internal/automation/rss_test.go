@@ -457,3 +457,45 @@ func TestRSSSyncSkipsInFlightEpisode(t *testing.T) {
 		t.Fatalf("in-flight episode must not be re-grabbed: res=%+v reqs=%d", res, len(fe.reqs))
 	}
 }
+
+func TestRSSSyncPlacesMonitoredEpisodesOfUnmonitoredSeries(t *testing.T) {
+	st := newStore(t)
+	ctx := context.Background()
+	seedPartiallyMonitoredShow(t, st, 5, 3)
+	fs := &fakeSearcher{releases: episodeReleases(5)}
+	fe := &fakeEnqueuer{}
+	svc := NewService(st, fs, fe, nil)
+
+	res, err := svc.RSSSync(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Grabbed != 1 || len(fe.reqs) != 1 {
+		t.Fatalf("RSS must place monitored episodes of an unmonitored series: grabbed=%d reqs=%d", res.Grabbed, len(fe.reqs))
+	}
+}
+
+func TestRSSSyncSkipsSeriesWithNoMonitoredEpisodes(t *testing.T) {
+	st := newStore(t)
+	ctx := context.Background()
+	sid, epIDs := seedSeries(t, st, true, 5)
+	for _, id := range epIDs {
+		if err := st.SetEpisodeMonitored(ctx, id, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.SetSeriesMonitored(ctx, sid, false); err != nil {
+		t.Fatal(err)
+	}
+	fs := &fakeSearcher{releases: episodeReleases(5)}
+	fe := &fakeEnqueuer{}
+	svc := NewService(st, fs, fe, nil)
+
+	res, err := svc.RSSSync(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Grabbed != 0 || len(fe.reqs) != 0 {
+		t.Fatalf("a fully unmonitored series must be skipped: grabbed=%d reqs=%d", res.Grabbed, len(fe.reqs))
+	}
+}

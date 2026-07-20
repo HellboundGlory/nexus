@@ -371,3 +371,23 @@ func TestUpgradeSweepIgnoresOtherSeriesInFlight(t *testing.T) {
 		t.Fatalf("another series' in-flight rows must not affect this series' upgrade budget: n=%d reqs=%d", n, len(fe.reqs))
 	}
 }
+
+func TestUpgradeSweepUpgradesMonitoredEpisodesOfUnmonitoredSeries(t *testing.T) {
+	st := newStore(t)
+	ctx := context.Background()
+	sid, _ := seedUpgradableSeries(t, st, 4)
+	if err := st.SetSeriesMonitored(ctx, sid, false); err != nil {
+		t.Fatal(err)
+	}
+	fs := &fakeSearcher{releases: episodeReleases(4)}
+	fe := &fakeEnqueuer{}
+	svc := NewService(st, fs, fe, nil)
+
+	n, err := svc.UpgradeSweep(ctx, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 || len(fe.reqs) != 1 {
+		t.Fatalf("upgrades must follow episode monitoring, not the series flag: n=%d reqs=%d", n, len(fe.reqs))
+	}
+}

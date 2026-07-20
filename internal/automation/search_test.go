@@ -878,3 +878,91 @@ func TestSearchSeasonSkipsPackWhenSeasonOnlyPartiallyMonitored(t *testing.T) {
 		t.Fatalf("want a single-episode grab, got EpisodeIDs=%v", fe.reqs[0].EpisodeIDs)
 	}
 }
+
+// seedPartiallyMonitoredShow reproduces the state the UI leaves behind when a
+// user unmonitors a whole show and then ticks a few episodes back on:
+// series flag off, season row off, but N episodes monitored. Both cascades run
+// downward only, so nothing ever turns the parent flags back on.
+func seedPartiallyMonitoredShow(t *testing.T, st *store.Store, total, keepMonitored int) (int64, []int64) {
+	t.Helper()
+	ctx := context.Background()
+	sid, epIDs := seedSeries(t, st, true, total)
+	for _, id := range epIDs[keepMonitored:] {
+		if err := st.SetEpisodeMonitored(ctx, id, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	unmonitorSeasonRow(t, st, sid, 1)
+	if err := st.SetSeriesMonitored(ctx, sid, false); err != nil {
+		t.Fatal(err)
+	}
+	return sid, epIDs
+}
+
+func TestSearchSeriesSearchesMonitoredEpisodesOfUnmonitoredSeries(t *testing.T) {
+	st := newStore(t)
+	ctx := context.Background()
+	sid, _ := seedPartiallyMonitoredShow(t, st, 5, 3)
+	fs := &fakeSearcher{releases: episodeReleases(5)}
+	fe := &fakeEnqueuer{}
+	svc := NewService(st, fs, fe, nil)
+
+	n, err := svc.SearchSeries(ctx, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 || len(fe.reqs) != 1 {
+		t.Fatalf("monitored episodes must be searched even when the series flag is off: n=%d reqs=%d", n, len(fe.reqs))
+	}
+}
+
+func TestMissingSweepReachesMonitoredEpisodesOfUnmonitoredSeries(t *testing.T) {
+	st := newStore(t)
+	ctx := context.Background()
+	seedPartiallyMonitoredShow(t, st, 5, 3)
+	fs := &fakeSearcher{releases: episodeReleases(5)}
+	fe := &fakeEnqueuer{}
+	svc := NewService(st, fs, fe, nil)
+
+	n, err := svc.MissingSweep(ctx, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 || len(fe.reqs) != 1 {
+		t.Fatalf("the sweep must reach monitored episodes of an unmonitored series: n=%d reqs=%d", n, len(fe.reqs))
+	}
+}
+
+// THE MASTER SWITCH MUST STILL WORK. Decision A keeps "unmonitor the series =
+// stop everything" working ONLY because unmonitoring cascades every episode off.
+// If someone later loosens the per-episode filter, every unmonitored series in
+// the library silently starts downloading again. This pins that.
+func TestUnmonitoredSeriesWithNoMonitoredEpisodesGrabsNothing(t *testing.T) {
+	st := newStore(t)
+	ctx := context.Background()
+	sid, epIDs := seedSeries(t, st, true, 5)
+	for _, id := range epIDs {
+		if err := st.SetEpisodeMonitored(ctx, id, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	unmonitorSeasonRow(t, st, sid, 1)
+	if err := st.SetSeriesMonitored(ctx, sid, false); err != nil {
+		t.Fatal(err)
+	}
+	fs := &fakeSearcher{releases: episodeReleases(5)}
+	fe := &fakeEnqueuer{}
+	svc := NewService(st, fs, fe, nil)
+
+	n, err := svc.SearchSeries(ctx, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sweepN, err := svc.MissingSweep(ctx, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 || sweepN != 0 || len(fe.reqs) != 0 {
+		t.Fatalf("a fully unmonitored series must grab nothing: search=%d sweep=%d reqs=%d", n, sweepN, len(fe.reqs))
+	}
+}

@@ -220,3 +220,55 @@ func TestCalendarQueries(t *testing.T) {
 		t.Fatalf("want 1 movie In got %+v", gm)
 	}
 }
+
+func TestHasMonitoredEpisodes(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	sid, err := s.CreateSeries(ctx, Series{TMDBID: 9001, Title: "Partly", SortTitle: "partly", Monitored: false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpsertSeason(ctx, Season{SeriesID: sid, SeasonNumber: 1, Monitored: false}); err != nil {
+		t.Fatal(err)
+	}
+	for i := 1; i <= 3; i++ {
+		if err := s.UpsertEpisode(ctx, Episode{SeriesID: sid, SeasonNumber: 1, EpisodeNumber: i, Monitored: false}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// No monitored episodes yet, even though the rows exist.
+	has, err := s.HasMonitoredEpisodes(ctx, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if has {
+		t.Fatal("want false when every episode is unmonitored")
+	}
+	// Monitor exactly one, leaving the series and season rows unmonitored.
+	eps, err := s.ListEpisodes(ctx, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetEpisodeMonitored(ctx, eps[1].ID, true); err != nil {
+		t.Fatal(err)
+	}
+	has, err = s.HasMonitoredEpisodes(ctx, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !has {
+		t.Fatal("want true when one episode is monitored, regardless of the series and season flags")
+	}
+	// Must be scoped to the series, not global.
+	other, err := s.CreateSeries(ctx, Series{TMDBID: 9002, Title: "Other", SortTitle: "other", Monitored: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	has, err = s.HasMonitoredEpisodes(ctx, other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if has {
+		t.Fatal("want false for a series with no episodes at all")
+	}
+}

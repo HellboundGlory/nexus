@@ -156,9 +156,13 @@ func (s *Service) searchSeries(ctx context.Context, seriesID int64) (int, error)
 	if err != nil {
 		return 0, err
 	}
-	if !se.Monitored {
-		return 0, nil
-	}
+	// Deliberately NOT gated on se.Monitored: episode-level monitoring is the
+	// source of truth. A series row can be unmonitored while episodes inside it
+	// are monitored, because both cascades run DOWNWARD only (unmonitoring a
+	// series clears its seasons and episodes) while re-monitoring a single
+	// episode never turns its parents back on. The master switch still works:
+	// unmonitoring a series clears every episode flag, so the per-episode
+	// filters below find nothing left to grab.
 	profile, ok, err := s.profileFor(ctx, se.QualityProfileID)
 	if err != nil || !ok {
 		return 0, err
@@ -215,9 +219,13 @@ func (s *Service) searchSeasonEntry(ctx context.Context, seriesID int64, seasonN
 	if err != nil {
 		return 0, err
 	}
-	if !se.Monitored {
-		return 0, nil
-	}
+	// Deliberately NOT gated on se.Monitored: episode-level monitoring is the
+	// source of truth. A series row can be unmonitored while episodes inside it
+	// are monitored, because both cascades run DOWNWARD only (unmonitoring a
+	// series clears its seasons and episodes) while re-monitoring a single
+	// episode never turns its parents back on. The master switch still works:
+	// unmonitoring a series clears every episode flag, so the per-episode
+	// filters below find nothing left to grab.
 	profile, ok, err := s.profileFor(ctx, se.QualityProfileID)
 	if err != nil || !ok {
 		return 0, err
@@ -331,7 +339,8 @@ func (s *Service) searchEpisodeEntry(ctx context.Context, episodeID int64) (int,
 	if err != nil {
 		return 0, err
 	}
-	if !se.Monitored || !e.Monitored {
+	// The episode's own flag governs; the series flag does not (see searchSeries).
+	if !e.Monitored {
 		return 0, nil
 	}
 	profile, ok, err := s.profileFor(ctx, se.QualityProfileID)
@@ -475,7 +484,14 @@ func (s *Service) MissingSweep(ctx context.Context, batch int) (int, error) {
 		if processed >= batch {
 			return total, nil
 		}
-		if !se.Monitored {
+		// Episode-level monitoring governs (see searchSeries), but skip a series
+		// with nothing monitored so it neither loads its episode list nor spends
+		// one of the batch's slots to grab zero.
+		hasMon, err := s.store.HasMonitoredEpisodes(ctx, se.ID)
+		if err != nil {
+			return total, err
+		}
+		if !hasMon {
 			continue
 		}
 		processed++
