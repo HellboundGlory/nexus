@@ -85,4 +85,41 @@ func TestAPIConfigRoundTrip(t *testing.T) {
 	}
 }
 
+// TestAPIConfigPutOmittedMaxConcurrentPerSeriesIsUnlimited pins the exact
+// mechanism a user relies on to turn off the per-series gate: the settings
+// form (Task 7) omits maxConcurrentPerSeries from the PUT body entirely when
+// the field is cleared to 0, rather than sending a literal 0. This only
+// works because of three independent facts (see config.go and Config()):
+// (1) putConfig decodes into a zero-value Config, so an omitted key decodes
+// as 0; (2) the Config struct tag has no `omitempty`, so SetConfig persists
+// the literal 0; (3) Config()'s read-side clamp loop deliberately excludes
+// MaxConcurrentPerSeries. Exercise the full HTTP PUT -> GET chain so a
+// regression in any one of those three facts fails this test.
+func TestAPIConfigPutOmittedMaxConcurrentPerSeriesIsUnlimited(t *testing.T) {
+	r, _, _ := newTestAPI(t)
+	// Deliberately omit maxConcurrentPerSeries - this is exactly what the
+	// frontend sends when the user types 0 into the "0 = unlimited" field.
+	put := httptest.NewRequest(http.MethodPut, "/automation/config",
+		strings.NewReader(`{"missingSearchIntervalHours":8,"missingSearchBatchSize":10}`))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, put)
+	if w.Code != http.StatusOK {
+		t.Fatalf("PUT config want 200, got %d (%s)", w.Code, w.Body.String())
+	}
+
+	get := httptest.NewRequest(http.MethodGet, "/automation/config", nil)
+	w2 := httptest.NewRecorder()
+	r.ServeHTTP(w2, get)
+	if w2.Code != http.StatusOK {
+		t.Fatalf("GET config want 200, got %d (%s)", w2.Code, w2.Body.String())
+	}
+	var c Config
+	if err := json.NewDecoder(w2.Body).Decode(&c); err != nil {
+		t.Fatal(err)
+	}
+	if c.MaxConcurrentPerSeries != 0 {
+		t.Fatalf("omitting maxConcurrentPerSeries on PUT must read back as 0 (unlimited), got %d", c.MaxConcurrentPerSeries)
+	}
+}
+
 func itoa(v int64) string { return strconv.FormatInt(v, 10) }

@@ -17,4 +17,5 @@ export type AutomationConfig = {
   upgradeSearchIntervalHours: number
   upgradeSearchBatchSize: number
   upgradeGrabCooldownHours: number
+  maxConcurrentPerSeries: number
 }

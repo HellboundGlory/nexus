@@ -10,6 +10,7 @@ const NUM_FIELDS: { key: keyof AutomationConfig; label: string }[] = [
   { key: "upgradeSearchIntervalHours", label: "Upgrade search interval (hours)" },
   { key: "upgradeSearchBatchSize", label: "Upgrade search batch size" },
   { key: "upgradeGrabCooldownHours", label: "Upgrade grab cooldown (hours)" },
+  { key: "maxConcurrentPerSeries", label: "Max concurrent downloads per series (0 = unlimited)" },
 ]
 const BOOL_FIELDS: { key: keyof AutomationConfig; label: string }[] = [
   { key: "rssSyncEnabled", label: "RSS sync enabled" },
