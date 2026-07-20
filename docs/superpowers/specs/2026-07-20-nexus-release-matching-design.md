@@ -192,16 +192,24 @@ release yields `"The Pendant That Starts It All Part 1"`; no overlap, rejected. 
 
 ## 5. Component: per-series required / ignored terms
 
-Migration `0009` also adds `required_terms` and `ignored_terms` to `series`, JSON arrays,
-defaulting to empty.
+Migration `0009` also adds to `series`: `required_terms` and `ignored_terms` (JSON arrays,
+default empty) and `required_mode` (TEXT, default `'any'`).
 
-Semantics follow Sonarr's `ReleaseRestrictionsSpecification`:
+Semantics follow Sonarr's `ReleaseRestrictionsSpecification`, with one addition:
 
-- **Required:** if any terms are set, the release title must contain **at least one**
-  (Sonarr's "any", not "all").
-- **Ignored:** if the release title contains **any**, reject.
+- **Required:** if any terms are set, the release title must satisfy them according to
+  `required_mode`:
+  - `any` (**default**) — contain **at least one** term. This is Sonarr's behaviour.
+  - `all` — contain **every** term. Not in Sonarr; added because "any" alone cannot
+    express a genuine conjunction, e.g. requiring both `Indigo` and `1080p`.
+- **Ignored:** if the release title contains **any** term, reject. No mode — "contains any
+  forbidden token" is already the only sensible reading, and an "all" variant would mean
+  "reject only if it contains every bad word", which nobody wants.
 - Case-insensitive **substring** match on the **raw release title**, not the parsed title,
   so tokens parsing strips (`HebDub`, `-BurCyg`) remain targetable.
+- `required_mode` is ignored when `required_terms` is empty, and any value other than
+  `all` is treated as `any` so a bad or missing value fails to the permissive default
+  rather than silently rejecting everything.
 
 **Divergence from Sonarr, deliberate:** Sonarr attaches these via a global `ReleaseProfile`
 scoped by **tags**. Nexus has no tags subsystem (migrations stop at `0008`), and building
@@ -230,8 +238,12 @@ decision, not only searches.
 ## 7. Frontend
 
 Two textareas on the series detail page (one term per line) for required and ignored
-terms, following existing settings-form patterns. CSS custom properties only.
+terms, plus a **Match any / Match all** control on the required field bound to
+`required_mode`. Following existing settings-form patterns; CSS custom properties only.
 `web/dist` rebuilt once, in the final task.
+
+The mode control is only meaningful with two or more required terms, but it renders
+unconditionally — hiding it would leave users unable to discover the option.
 
 ## 8. Testing
 
@@ -247,6 +259,11 @@ terms, following existing settings-form patterns. CSS custom properties only.
   survive. This is the guard for the entire incident.
 - A fixture must make outcomes visibly differ: a series with several missing episodes, and
   candidates that differ in *which* check would reject them.
+- **`required_mode` needs at least two terms and a candidate matching exactly one of them**
+  to be tested at all. With a single term, or with a candidate matching both, `any` and
+  `all` produce identical results and the test passes against either mode — the same
+  fixture trap that made three earlier tests on this project vacuous. The `all` test must
+  also be mutation-verified against forcing the mode to `any`.
 
 ## 9. Out of scope
 
