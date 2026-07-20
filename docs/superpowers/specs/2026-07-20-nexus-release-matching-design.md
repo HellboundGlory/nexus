@@ -164,7 +164,7 @@ Worked examples from live indexer data:
 |---|---|---|
 | `Pokemon.S01E01.The.Pendant.That.Starts.It.All.Part.1.1080p.WEBRip…` | `The Pendant That Starts It All Part 1` | present |
 | `Pokemon.S01E01.DVDRip.x264-QCF` | `` (stops at `DVDRip`) | absent |
-| `Pokemon.S01E01.PDTV.HebDub.XviD-Sweet-Star` | `` (stops at `PDTV`) | absent |
+| `Pokemon.S01E01.PDTV.HebDub.XviD-Sweet-Star` | `` (stops at `PDTV`, once `PDTV` is a known source — see below) | absent |
 | `Pokmon.Indigo.League.s01e01` | `` (nothing follows) | absent |
 
 Two edge cases, made explicit so they are not decided by accident:
@@ -174,6 +174,28 @@ Two edge cases, made explicit so they are not decided by accident:
   tolerates it, since it only needs one side to contain the other.
 - **No `S##E##` marker at all** — `EpisodeTitle` is empty. Such releases already fail the
   season/episode filter upstream, so this adds no new behaviour.
+
+### 4.1.1 Two guards against false rejection — verified empirically, not assumed
+
+Extraction was probed against the real release titles before this spec was finalised. The
+naive version **wrongly rejects a legitimate release**, so two corrections are mandatory.
+
+**`PDTV` is not a source token Nexus recognises.** `sourcePatterns`
+(`internal/parsing/parser.go:22-33`) has no `PDTV` entry, so for
+`Pokemon.S01E01.PDTV.HebDub.XviD-Sweet-Star` no source matches at all and extraction cuts
+at the *codec* (`XviD`), yielding `"PDTV HebDub"` — which contradicts the stored title and
+rejects a release that may well be correct. **Add `PDTV` and `SDTV` to `sourcePatterns`.**
+That is a genuine parser improvement, not a workaround: both are real sources. With `PDTV`
+recognised, extraction cuts immediately and correctly yields nothing.
+
+**Single-token candidates carry no signal.** A candidate must contain **at least two
+alphabetic tokens of three or more characters** to be treated as an episode title. This is
+a cheap net for any technical token that leaks past the stop list in future: a stray
+`HebDub` on its own yields no signal instead of a false contradiction.
+
+The asymmetry justifying both guards: a false *rejection* means nothing downloads — the
+failure the user has already suffered twice — while a missed *signal* only means we fall
+back to the other checks. Extraction must fail toward silence.
 
 ### 4.2 Rule: reject only on positive contradiction
 
