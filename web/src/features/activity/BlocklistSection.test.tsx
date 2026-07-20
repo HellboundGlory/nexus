@@ -6,7 +6,7 @@ import { ToastProvider } from "@/lib/toast"
 import { BlocklistSection } from "./BlocklistSection"
 import * as api from "./api"
 import * as qualityApi from "@/features/settings/qualityApi"
-import type { BlocklistEntry } from "./types"
+import type { BlocklistEntry, Paged } from "./types"
 
 vi.mock("./api")
 vi.mock("@/features/settings/qualityApi")
@@ -23,10 +23,15 @@ function entry(over: Partial<BlocklistEntry>): BlocklistEntry {
   }
 }
 
+function paged(items: BlocklistEntry[], over: Partial<Paged<BlocklistEntry>> = {}): Paged<BlocklistEntry> {
+  return { items, page: 1, pageSize: 50, total: items.length, ...over }
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
   vi.mocked(qualityApi.useQualityDefinitions).mockReturnValue({ data: [{ id: 3, name: "WEBDL-1080p", source: 1, resolution: 3, rank: 3 }] } as never)
   vi.mocked(api.useRemoveBlocklist).mockReturnValue(mut())
+  vi.mocked(api.useClearBlocklist).mockReturnValue(mut())
 })
 
 function renderBlocklist() {
@@ -35,13 +40,13 @@ function renderBlocklist() {
 
 describe("BlocklistSection", () => {
   it("shows an empty state when the blocklist is empty", () => {
-    vi.mocked(api.useBlocklist).mockReturnValue({ data: [], isLoading: false, isError: false } as never)
+    vi.mocked(api.useBlocklist).mockReturnValue({ data: paged([], { total: 0 }), isLoading: false, isError: false } as never)
     renderBlocklist()
     expect(screen.getByText(/no blocklisted releases/i)).toBeInTheDocument()
   })
 
   it("lists entries with title, reason and quality", () => {
-    vi.mocked(api.useBlocklist).mockReturnValue({ data: [entry({})], isLoading: false, isError: false } as never)
+    vi.mocked(api.useBlocklist).mockReturnValue({ data: paged([entry({})]), isLoading: false, isError: false } as never)
     renderBlocklist()
     expect(screen.getByText("Dune.2021-GRP")).toBeInTheDocument()
     expect(screen.getByText("Dune")).toBeInTheDocument()
@@ -52,7 +57,7 @@ describe("BlocklistSection", () => {
   it("removes an entry after confirm", async () => {
     const mutate = vi.fn()
     vi.mocked(api.useRemoveBlocklist).mockReturnValue(mut({ mutate }))
-    vi.mocked(api.useBlocklist).mockReturnValue({ data: [entry({ id: 7 })], isLoading: false, isError: false } as never)
+    vi.mocked(api.useBlocklist).mockReturnValue({ data: paged([entry({ id: 7 })]), isLoading: false, isError: false } as never)
     vi.spyOn(window, "confirm").mockReturnValue(true)
     renderBlocklist()
     await userEvent.click(screen.getByRole("button", { name: /remove/i }))
@@ -62,10 +67,29 @@ describe("BlocklistSection", () => {
   it("does not remove when confirm is cancelled", async () => {
     const mutate = vi.fn()
     vi.mocked(api.useRemoveBlocklist).mockReturnValue(mut({ mutate }))
-    vi.mocked(api.useBlocklist).mockReturnValue({ data: [entry({ id: 7 })], isLoading: false, isError: false } as never)
+    vi.mocked(api.useBlocklist).mockReturnValue({ data: paged([entry({ id: 7 })]), isLoading: false, isError: false } as never)
     vi.spyOn(window, "confirm").mockReturnValue(false)
     renderBlocklist()
     await userEvent.click(screen.getByRole("button", { name: /remove/i }))
     expect(mutate).not.toHaveBeenCalled()
+  })
+
+  it("hides Clear when there is nothing to clear", () => {
+    vi.mocked(api.useBlocklist).mockReturnValue({ data: paged([], { total: 0 }), isLoading: false, isError: false } as never)
+    renderBlocklist()
+    expect(screen.queryByRole("button", { name: /clear blocklist/i })).toBeNull()
+  })
+
+  it("clears the blocklist after confirming", async () => {
+    const mutate = vi.fn()
+    vi.mocked(api.useClearBlocklist).mockReturnValue(mut({ mutate }))
+    vi.mocked(api.useBlocklist).mockReturnValue({
+      data: paged([entry({}), entry({ id: 2 })], { total: 2 }),
+      isLoading: false, isError: false,
+    } as never)
+    renderBlocklist()
+    await userEvent.click(screen.getByRole("button", { name: /clear blocklist/i }))
+    await userEvent.click(screen.getByRole("button", { name: /^clear$/i }))
+    expect(mutate).toHaveBeenCalled()
   })
 })
