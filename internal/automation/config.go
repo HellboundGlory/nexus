@@ -19,6 +19,12 @@ type Config struct {
 	UpgradeSearchIntervalHours int  `json:"upgradeSearchIntervalHours"`
 	UpgradeSearchBatchSize     int  `json:"upgradeSearchBatchSize"`
 	UpgradeGrabCooldownHours   int  `json:"upgradeGrabCooldownHours"`
+
+	// MaxConcurrentPerSeries caps how many downloads one TV series may have in
+	// flight at once. Unlike every other numeric field here, it is deliberately
+	// NOT clamped in Config(): <= 0 means unlimited and is the documented way to
+	// disable the gate entirely.
+	MaxConcurrentPerSeries int `json:"maxConcurrentPerSeries"`
 }
 
 // DefaultConfig is applied when no config has been saved.
@@ -32,6 +38,7 @@ func DefaultConfig() Config {
 		UpgradeSearchIntervalHours: 12,
 		UpgradeSearchBatchSize:     100,
 		UpgradeGrabCooldownHours:   168,
+		MaxConcurrentPerSeries:     1,
 	}
 }
 

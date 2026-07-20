@@ -127,6 +127,38 @@ func TestConfigUpgradeDefaults(t *testing.T) {
 	}
 }
 
+func TestDefaultConfigLimitsOneDownloadPerSeries(t *testing.T) {
+	if got := DefaultConfig().MaxConcurrentPerSeries; got != 1 {
+		t.Fatalf("want default 1, got %d", got)
+	}
+}
+
+// 0 is the documented off switch for the per-series gate. Every OTHER numeric
+// field in Config() is clamped to its default when non-positive; this one must
+// not be, or the off switch silently becomes a limit of 1.
+func TestConfigPreservesZeroMaxConcurrentPerSeries(t *testing.T) {
+	st := newStore(t)
+	ctx := context.Background()
+	svc := NewService(st, &fakeSearcher{}, &fakeEnqueuer{}, nil)
+
+	c := DefaultConfig()
+	c.MaxConcurrentPerSeries = 0
+	if err := svc.SetConfig(ctx, c); err != nil {
+		t.Fatal(err)
+	}
+	got, err := svc.Config(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.MaxConcurrentPerSeries != 0 {
+		t.Fatalf("0 must survive as 'unlimited', got %d", got.MaxConcurrentPerSeries)
+	}
+	// Sanity: a sibling field IS still clamped, proving the exemption is specific.
+	if got.MissingSearchBatchSize != DefaultConfig().MissingSearchBatchSize {
+		t.Fatalf("sibling clamp should be unchanged, got %d", got.MissingSearchBatchSize)
+	}
+}
+
 func TestConfigUpgradeClamps(t *testing.T) {
 	svc := NewService(newStore(t), nil, nil, nil)
 	ctx := context.Background()
