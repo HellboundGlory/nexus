@@ -171,16 +171,24 @@ func (s *Service) searchSeries(ctx context.Context, seriesID int64) (int, error)
 	if err != nil {
 		return 0, err
 	}
-	_, activeEps, _, err := s.activeQueue(ctx)
+	_, activeEps, inFlight, err := s.activeQueue(ctx)
 	if err != nil {
 		return 0, err
 	}
+	cfg, err := s.Config(ctx)
+	if err != nil {
+		return 0, err
+	}
+	bud := newBudget(cfg.MaxConcurrentPerSeries, inFlight[seriesID])
 	total := 0
 	for _, sn := range seasons {
+		if !bud.allows() {
+			break
+		}
 		if !sn.Monitored {
 			continue
 		}
-		n, err := s.searchSeason(ctx, se, sn.SeasonNumber, eps, profile, activeEps)
+		n, err := s.searchSeason(ctx, se, sn.SeasonNumber, eps, profile, activeEps, bud)
 		if err != nil {
 			return total, err
 		}
@@ -212,18 +220,23 @@ func (s *Service) searchSeasonEntry(ctx context.Context, seriesID int64, seasonN
 	if err != nil {
 		return 0, err
 	}
-	_, activeEps, _, err := s.activeQueue(ctx)
+	_, activeEps, inFlight, err := s.activeQueue(ctx)
 	if err != nil {
 		return 0, err
 	}
-	return s.searchSeason(ctx, se, seasonNumber, eps, profile, activeEps)
+	cfg, err := s.Config(ctx)
+	if err != nil {
+		return 0, err
+	}
+	bud := newBudget(cfg.MaxConcurrentPerSeries, inFlight[seriesID])
+	return s.searchSeason(ctx, se, seasonNumber, eps, profile, activeEps, bud)
 }
 
 // searchSeason searches a single season. If every monitored episode in the
 // season is missing, it tries a full-season pack first (enqueued with all
 // missing episode ids); otherwise, or if no acceptable pack is found, it falls
 // back to per-episode searches. eps is the full episode list for the series.
-func (s *Service) searchSeason(ctx context.Context, se *store.Series, seasonNumber int, eps []store.Episode, profile store.QualityProfile, activeEps map[int64]struct{}) (int, error) {
+func (s *Service) searchSeason(ctx context.Context, se *store.Series, seasonNumber int, eps []store.Episode, profile store.QualityProfile, activeEps map[int64]struct{}, bud *budget) (int, error) {
 	var monitored, missing []store.Episode
 	for _, e := range eps {
 		if e.SeasonNumber != seasonNumber || !e.Monitored {
@@ -239,6 +252,9 @@ func (s *Service) searchSeason(ctx context.Context, se *store.Series, seasonNumb
 		}
 	}
 	if len(missing) == 0 {
+		return 0, nil
+	}
+	if !bud.allows() {
 		return 0, nil
 	}
 	// Fully missing → try a season pack first.
@@ -265,13 +281,17 @@ func (s *Service) searchSeason(ctx context.Context, se *store.Series, seasonNumb
 			return 0, err
 		}
 		if grabbed {
+			bud.take()
 			return 1, nil
 		}
 		// no acceptable pack → fall through to per-episode
 	}
 	total := 0
 	for _, e := range missing {
-		n, err := s.searchEpisode(ctx, se, e, profile, activeEps)
+		if !bud.allows() {
+			break
+		}
+		n, err := s.searchEpisode(ctx, se, e, profile, activeEps, bud)
 		if err != nil {
 			return total, err
 		}
@@ -303,16 +323,21 @@ func (s *Service) searchEpisodeEntry(ctx context.Context, episodeID int64) (int,
 	if err != nil || !ok {
 		return 0, err
 	}
-	_, activeEps, _, err := s.activeQueue(ctx)
+	_, activeEps, inFlight, err := s.activeQueue(ctx)
 	if err != nil {
 		return 0, err
 	}
-	return s.searchEpisode(ctx, se, *e, profile, activeEps)
+	cfg, err := s.Config(ctx)
+	if err != nil {
+		return 0, err
+	}
+	bud := newBudget(cfg.MaxConcurrentPerSeries, inFlight[e.SeriesID])
+	return s.searchEpisode(ctx, se, *e, profile, activeEps, bud)
 }
 
 // searchEpisode searches one episode and enqueues the best covering release.
 // Skips if the episode already has a file or is already in flight in the queue.
-func (s *Service) searchEpisode(ctx context.Context, se *store.Series, e store.Episode, profile store.QualityProfile, activeEps map[int64]struct{}) (int, error) {
+func (s *Service) searchEpisode(ctx context.Context, se *store.Series, e store.Episode, profile store.QualityProfile, activeEps map[int64]struct{}, bud *budget) (int, error) {
 	f, err := s.store.MediaFileForEpisode(ctx, e.ID)
 	if err != nil {
 		return 0, err
@@ -321,6 +346,9 @@ func (s *Service) searchEpisode(ctx context.Context, se *store.Series, e store.E
 		return 0, nil
 	}
 	if _, queued := activeEps[e.ID]; queued {
+		return 0, nil
+	}
+	if !bud.allows() {
 		return 0, nil
 	}
 	ep := e.EpisodeNumber
@@ -345,6 +373,7 @@ func (s *Service) searchEpisode(ctx context.Context, se *store.Series, e store.E
 		return 0, err
 	}
 	if grabbed {
+		bud.take()
 		return 1, nil
 	}
 	return 0, nil
