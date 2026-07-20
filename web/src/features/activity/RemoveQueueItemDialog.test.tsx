@@ -29,4 +29,39 @@ describe("RemoveQueueItemDialog", () => {
     open()
     expect(screen.getByText(/re-grab/i)).toBeTruthy()
   })
+
+  it("resets checkboxes after closing and reopening for a different row", async () => {
+    const onConfirm = vi.fn()
+    const { rerender } = render(
+      <RemoveQueueItemDialog
+        open
+        onOpenChange={vi.fn()}
+        title="Dune.2021-GRP"
+        onConfirm={onConfirm}
+      />,
+    )
+
+    await userEvent.click(screen.getByLabelText(/remove from download client/i))
+    await userEvent.click(screen.getByLabelText(/blocklist/i))
+
+    rerender(
+      <RemoveQueueItemDialog
+        open={false}
+        onOpenChange={vi.fn()}
+        title="Dune.2021-GRP"
+        onConfirm={onConfirm}
+      />,
+    )
+    rerender(
+      <RemoveQueueItemDialog
+        open
+        onOpenChange={vi.fn()}
+        title="Another.Show.2022-GRP"
+        onConfirm={onConfirm}
+      />,
+    )
+
+    await userEvent.click(screen.getByRole("button", { name: /^remove$/i }))
+    expect(onConfirm).toHaveBeenCalledWith({ removeFromClient: true, blocklist: false })
+  })
 })
