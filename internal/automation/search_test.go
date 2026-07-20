@@ -966,3 +966,114 @@ func TestUnmonitoredSeriesWithNoMonitoredEpisodesGrabsNothing(t *testing.T) {
 		t.Fatalf("a fully unmonitored series must grab nothing: search=%d sweep=%d reqs=%d", n, sweepN, len(fe.reqs))
 	}
 }
+
+// The indexer matches its q term loosely, so a search for "Pokemon" S01E01
+// returns S01E01 of every show whose name starts with Pokemon. Season and
+// episode numbers alone cannot tell them apart -- the release title must be
+// checked against the series being searched for.
+func TestSearchEpisodeRejectsReleaseFromADifferentShow(t *testing.T) {
+	st := newStore(t)
+	ctx := context.Background()
+	sid, epIDs := seedSeries(t, st, true, 1)
+	fs := &fakeSearcher{releases: []provider.Release{{
+		Title:       "The.Show.Trainer.Tour.S01E01.1080p.WEB-DL.x264-GRP",
+		DownloadURL: "wrong", Protocol: provider.ProtocolUsenet,
+	}}}
+	fe := &fakeEnqueuer{}
+	svc := NewService(st, fs, fe, nil)
+
+	n, err := svc.SearchEpisode(ctx, epIDs[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 || len(fe.reqs) != 0 {
+		t.Fatalf("a release for a different show must not be grabbed: n=%d reqs=%+v", n, fe.reqs)
+	}
+	_ = sid
+}
+
+func TestSearchEpisodePrefersTheRightShowOverABetterWrongOne(t *testing.T) {
+	st := newStore(t)
+	ctx := context.Background()
+	_, epIDs := seedSeries(t, st, true, 1)
+	fs := &fakeSearcher{releases: []provider.Release{
+		// The wrong show ranks higher on quality; it must still lose.
+		{Title: "The.Show.Trainer.Tour.S01E01.1080p.BluRay.x264-GRP", DownloadURL: "wrong", Protocol: provider.ProtocolUsenet},
+		{Title: "The.Show.S01E01.1080p.WEB-DL.x264-GRP", DownloadURL: "right", Protocol: provider.ProtocolUsenet},
+	}}
+	fe := &fakeEnqueuer{}
+	svc := NewService(st, fs, fe, nil)
+
+	n, err := svc.SearchEpisode(ctx, epIDs[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 || len(fe.reqs) != 1 || fe.reqs[0].DownloadURL != "right" {
+		t.Fatalf("want the matching show's release, got n=%d reqs=%+v", n, fe.reqs)
+	}
+}
+
+// The season-pack branch filters on the season number alone, so it has the
+// same hole: a pack belonging to a different show would be grabbed.
+func TestSearchSeasonRejectsPackFromADifferentShow(t *testing.T) {
+	st := newStore(t)
+	ctx := context.Background()
+	sid, _ := seedSeries(t, st, true, 3)
+	fs := &fakeSearcher{releases: []provider.Release{{
+		Title:       "The.Show.Trainer.Tour.S01.1080p.BluRay.x264-GRP",
+		DownloadURL: "wrongpack", Protocol: provider.ProtocolUsenet,
+	}}}
+	fe := &fakeEnqueuer{}
+	svc := NewService(st, fs, fe, nil)
+
+	n, err := svc.SearchSeason(ctx, sid, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 || len(fe.reqs) != 0 {
+		t.Fatalf("a pack for a different show must not be grabbed: n=%d reqs=%+v", n, fe.reqs)
+	}
+}
+
+// A stored title carrying an accent must still match its own ASCII releases --
+// scene names are ASCII. Without folding, "Pokemon" normalizes to "pok mon"
+// and the series would reject every legitimate release it has.
+func TestSearchEpisodeMatchesAccentedSeriesTitleAgainstASCIIRelease(t *testing.T) {
+	st := newStore(t)
+	ctx := context.Background()
+	prof, err := st.CreateQualityProfile(ctx, hdProfile())
+	if err != nil {
+		t.Fatal(err)
+	}
+	sid, err := st.CreateSeries(ctx, store.Series{TMDBID: 4242, Title: "Pokémon", Monitored: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetSeriesQualityProfileID(ctx, sid, &prof.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertSeason(ctx, store.Season{SeriesID: sid, SeasonNumber: 1, Monitored: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertEpisode(ctx, store.Episode{SeriesID: sid, SeasonNumber: 1, EpisodeNumber: 1, Monitored: true}); err != nil {
+		t.Fatal(err)
+	}
+	eps, err := st.ListEpisodes(ctx, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fs := &fakeSearcher{releases: []provider.Release{
+		{Title: "Pokemon.Trainer.Tour.S01E01.1080p.BluRay.x264-GRP", DownloadURL: "wrong", Protocol: provider.ProtocolUsenet},
+		{Title: "Pokemon.S01E01.1080p.WEB-DL.x264-GRP", DownloadURL: "right", Protocol: provider.ProtocolUsenet},
+	}}
+	fe := &fakeEnqueuer{}
+	svc := NewService(st, fs, fe, nil)
+
+	n, err := svc.SearchEpisode(ctx, eps[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 || len(fe.reqs) != 1 || fe.reqs[0].DownloadURL != "right" {
+		t.Fatalf("accented series title must match its ASCII release: n=%d reqs=%+v", n, fe.reqs)
+	}
+}

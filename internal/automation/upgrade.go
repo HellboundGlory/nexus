@@ -246,6 +246,11 @@ func (s *Service) upgradeEpisode(ctx context.Context, se *store.Series, e store.
 	}
 	var covering []Candidate
 	for _, c := range Decide(releases, provider.KindTV, profile) {
+		// Same loose-`q` hazard as the search path: an upgrade must not swap in
+		// a better-scoring episode of a different show (see releaseIsForSeries).
+		if !releaseIsForSeries(se, c.Parsed) {
+			continue
+		}
 		if c.Parsed.Season == e.SeasonNumber && containsInt(c.Parsed.Episodes, e.EpisodeNumber) {
 			covering = append(covering, c)
 		}
