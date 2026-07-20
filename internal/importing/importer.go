@@ -19,7 +19,7 @@ func (s *Service) ImportItem(ctx context.Context, queueID int64) error {
 	if err != nil {
 		return err
 	}
-	item, ok := matchItem(s.queue.Queue(ctx), row)
+	item, ok := matchItem(s.queue.Queue(ctx).Items, row)
 	if !ok || item.Status != provider.StatusCompleted || item.OutputPath == "" {
 		return s.fail(ctx, row, "download not completed or not found")
 	}

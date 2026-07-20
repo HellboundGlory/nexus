@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"testing"
 )
 
@@ -117,5 +118,44 @@ func TestBlocklistedReasonsNoTargetReturnsEmptyNonNil(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Fatalf("want empty map, got %v", got)
+	}
+}
+
+func TestListBlocklistPageAndClear(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+	movieID, err := st.CreateMovie(ctx, Movie{TMDBID: 1, Title: "Dune"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 4; i++ {
+		if _, err := st.AddBlocklist(ctx, Blocklist{
+			MediaKind: "movie", MovieID: &movieID,
+			SourceTitle: fmt.Sprintf("Dune.2021.%d-GRP", i), Reason: "boom",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	rows, total, err := st.ListBlocklistPage(ctx, 0, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 4 || len(rows) != 3 {
+		t.Fatalf("page = %d rows, total %d; want 3 rows, total 4", len(rows), total)
+	}
+	if rows[0].SourceTitle != "Dune.2021.3-GRP" {
+		t.Fatalf("rows[0] = %q, want newest (id DESC)", rows[0].SourceTitle)
+	}
+
+	n, err := st.ClearBlocklist(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 4 {
+		t.Fatalf("ClearBlocklist = %d, want 4", n)
+	}
+	if rows, _, _ := st.ListBlocklistPage(ctx, 0, 50); len(rows) != 0 {
+		t.Fatalf("after clear: %d rows, want 0", len(rows))
 	}
 }

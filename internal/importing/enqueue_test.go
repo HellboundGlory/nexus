@@ -2,6 +2,7 @@ package importing
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"strconv"
 	"testing"
@@ -23,16 +24,34 @@ func (f *fakeGrabber) Grab(_ context.Context, req provider.DownloadRequest, _ st
 }
 
 type fakeQueue struct {
-	items   []provider.DownloadItem
-	removed map[string]bool
+	items             []provider.DownloadItem
+	clientErrors      []ClientError
+	removed           map[string]bool
+	removedDeleteData map[string]bool   // deleteData flag Remove was called with, keyed by itemID
+	removedClientID   map[string]string // clientID Remove was actually called with, keyed by itemID
+	removeErr         error             // when non-nil, every Remove call fails with it
 }
 
-func (f *fakeQueue) Queue(context.Context) []provider.DownloadItem { return f.items }
-func (f *fakeQueue) Remove(_ context.Context, _, itemID string, _ bool) error {
+func (f *fakeQueue) Queue(context.Context) QueueSnapshot {
+	return QueueSnapshot{Items: f.items, ClientErrors: f.clientErrors}
+}
+
+func (f *fakeQueue) Remove(_ context.Context, clientID, itemID string, deleteData bool) error {
 	if f.removed == nil {
 		f.removed = map[string]bool{}
 	}
+	if f.removedDeleteData == nil {
+		f.removedDeleteData = map[string]bool{}
+	}
+	if f.removedClientID == nil {
+		f.removedClientID = map[string]string{}
+	}
+	if f.removeErr != nil {
+		return f.removeErr
+	}
 	f.removed[itemID] = true
+	f.removedDeleteData[itemID] = deleteData
+	f.removedClientID[itemID] = clientID
 	return nil
 }
 
@@ -43,6 +62,16 @@ func newSvc(t *testing.T) (*Service, *store.Store) {
 
 func newTestStore(t *testing.T) *store.Store {
 	t.Helper()
+	st, _ := newTestStoreWithDB(t)
+	return st
+}
+
+// newTestStoreWithDB is like newTestStore but also returns the underlying
+// *sql.DB, so a test can reach past the store.Store wrapper to manipulate the
+// schema directly (e.g. dropping a table to force a genuine SQL error out of
+// a store method that would otherwise never fail in a test DB).
+func newTestStoreWithDB(t *testing.T) (*store.Store, *sql.DB) {
+	t.Helper()
 	db, err := database.Open(t.TempDir() + "/t.db")
 	if err != nil {
 		t.Fatal(err)
@@ -51,13 +80,21 @@ func newTestStore(t *testing.T) *store.Store {
 	if err := database.Migrate(db); err != nil {
 		t.Fatal(err)
 	}
-	return store.New(db)
+	return store.New(db), db
 }
 
 func newSvcWithQueue(t *testing.T, q QueueReader) (*Service, *store.Store) {
 	t.Helper()
-	st := newTestStore(t)
-	return NewService(st, &fakeGrabber{returnID: "h1"}, q, nil), st
+	svc, st, _ := newSvcWithQueueAndDB(t, q)
+	return svc, st
+}
+
+// newSvcWithQueueAndDB is like newSvcWithQueue but also returns the
+// underlying *sql.DB for tests that need to break the schema directly.
+func newSvcWithQueueAndDB(t *testing.T, q QueueReader) (*Service, *store.Store, *sql.DB) {
+	t.Helper()
+	st, db := newTestStoreWithDB(t)
+	return NewService(st, &fakeGrabber{returnID: "h1"}, q, nil), st, db
 }
 
 func itoa(v int64) string { return strconv.FormatInt(v, 10) }

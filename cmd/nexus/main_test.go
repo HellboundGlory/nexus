@@ -6,6 +6,9 @@ import (
 	"net/http"
 	"testing"
 	"time"
+
+	"github.com/hellboundg/nexus/internal/core/provider"
+	"github.com/hellboundg/nexus/internal/downloadclient"
 )
 
 func TestRunStartsAndShutsDown(t *testing.T) {
@@ -208,6 +211,60 @@ func TestRunRegistersHousekeepingTask(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("Housekeeping scheduled task not registered")
+	}
+}
+
+func TestToQueueSnapshotMapsClientErrorFieldsAndItems(t *testing.T) {
+	items := []provider.DownloadItem{
+		{ID: "item-1", Title: "Some.Release.1080p", DownloadClientID: "sab"},
+	}
+	res := downloadclient.QueueResult{
+		Items: items,
+		ClientErrors: []downloadclient.ClientError{
+			{ClientID: "sab", Message: "connection refused"},
+			{ClientID: "qbit", Message: "timeout"},
+		},
+	}
+
+	snap := toQueueSnapshot(res)
+
+	if len(snap.ClientErrors) != len(res.ClientErrors) {
+		t.Fatalf("ClientErrors count = %d, want %d", len(snap.ClientErrors), len(res.ClientErrors))
+	}
+	if snap.ClientErrors[0].ClientID != "sab" {
+		t.Errorf("ClientErrors[0].ClientID = %q, want %q", snap.ClientErrors[0].ClientID, "sab")
+	}
+	if snap.ClientErrors[0].Message != "connection refused" {
+		t.Errorf("ClientErrors[0].Message = %q, want %q", snap.ClientErrors[0].Message, "connection refused")
+	}
+	if snap.ClientErrors[1].ClientID != "qbit" {
+		t.Errorf("ClientErrors[1].ClientID = %q, want %q", snap.ClientErrors[1].ClientID, "qbit")
+	}
+	if snap.ClientErrors[1].Message != "timeout" {
+		t.Errorf("ClientErrors[1].Message = %q, want %q", snap.ClientErrors[1].Message, "timeout")
+	}
+
+	if len(snap.Items) != len(items) {
+		t.Fatalf("Items count = %d, want %d", len(snap.Items), len(items))
+	}
+	if snap.Items[0].ID != items[0].ID || snap.Items[0].DownloadClientID != items[0].DownloadClientID {
+		t.Errorf("Items[0] = %+v, want %+v", snap.Items[0], items[0])
+	}
+}
+
+func TestToQueueSnapshotHealthyClientProducesNoClientErrors(t *testing.T) {
+	res := downloadclient.QueueResult{
+		Items:        []provider.DownloadItem{{ID: "item-1"}},
+		ClientErrors: nil,
+	}
+
+	snap := toQueueSnapshot(res)
+
+	if len(snap.ClientErrors) != 0 {
+		t.Fatalf("ClientErrors = %v, want empty", snap.ClientErrors)
+	}
+	if len(snap.Items) != 1 {
+		t.Fatalf("Items count = %d, want 1", len(snap.Items))
 	}
 }
 

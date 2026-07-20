@@ -21,15 +21,200 @@ func newTestAPI(t *testing.T) (http.Handler, *store.Store) {
 	return r, st
 }
 
-func TestAPIQueueListAndHistory(t *testing.T) {
+// /queue keeps its bare-array wire shape; only /history and /blocklist became
+// paged envelopes (spec §2 non-goals, §4.3).
+func TestAPIQueueStaysABareArray(t *testing.T) {
 	r, _ := newTestAPI(t)
-	for _, path := range []string{"/queue", "/history"} {
+	req := httptest.NewRequest(http.MethodGet, "/queue", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK || !strings.HasPrefix(strings.TrimSpace(w.Body.String()), "[") {
+		t.Fatalf("GET /queue status=%d body=%s, want a JSON array", w.Code, w.Body.String())
+	}
+}
+
+func TestAPIHistoryAndBlocklistArePagedEnvelopes(t *testing.T) {
+	r, st := newTestAPI(t)
+	ctx := context.Background()
+	for i := 0; i < 3; i++ {
+		if err := st.AddHistory(ctx, store.HistoryEvent{EventType: "grabbed", MediaKind: "movie"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, path := range []string{"/history?page=1&pageSize=2", "/blocklist"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, req)
-		if w.Code != http.StatusOK || !strings.HasPrefix(strings.TrimSpace(w.Body.String()), "[") {
-			t.Fatalf("GET %s status=%d body=%s", path, w.Code, w.Body.String())
+		if w.Code != http.StatusOK {
+			t.Fatalf("GET %s status=%d", path, w.Code)
 		}
+		var env struct {
+			Items    json.RawMessage `json:"items"`
+			Page     int             `json:"page"`
+			PageSize int             `json:"pageSize"`
+			Total    int             `json:"total"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
+			t.Fatalf("GET %s not an envelope: %v body=%s", path, err, w.Body.String())
+		}
+		if !strings.HasPrefix(strings.TrimSpace(string(env.Items)), "[") {
+			t.Fatalf("GET %s items = %s, want an array", path, env.Items)
+		}
+		if env.Page < 1 || env.PageSize < 1 {
+			t.Fatalf("GET %s page=%d pageSize=%d, want both >= 1", path, env.Page, env.PageSize)
+		}
+	}
+
+	// The page slice and total are honoured.
+	req := httptest.NewRequest(http.MethodGet, "/history?page=1&pageSize=2", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	var env struct {
+		Items []store.HistoryEvent `json:"items"`
+		Total int                  `json:"total"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
+		t.Fatal(err)
+	}
+	if len(env.Items) != 2 || env.Total != 3 {
+		t.Fatalf("items=%d total=%d, want 2 and 3", len(env.Items), env.Total)
+	}
+}
+
+func TestAPIPageSizeIsClamped(t *testing.T) {
+	r, _ := newTestAPI(t)
+	req := httptest.NewRequest(http.MethodGet, "/history?pageSize=9999", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	var env struct {
+		PageSize int `json:"pageSize"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
+		t.Fatal(err)
+	}
+	if env.PageSize != 100 {
+		t.Fatalf("pageSize = %d, want clamped to 100", env.PageSize)
+	}
+}
+
+func TestAPIClearHistoryAndBlocklist(t *testing.T) {
+	r, st := newTestAPI(t)
+	ctx := context.Background()
+	if err := st.AddHistory(ctx, store.HistoryEvent{EventType: "grabbed", MediaKind: "movie"}); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodDelete, "/history", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("DELETE /history = %d body=%s", w.Code, w.Body.String())
+	}
+	var got struct {
+		Removed int `json:"removed"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil || got.Removed != 1 {
+		t.Fatalf("removed = %d (err %v), want 1", got.Removed, err)
+	}
+
+	req = httptest.NewRequest(http.MethodDelete, "/blocklist", nil)
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("DELETE /blocklist = %d", w.Code)
+	}
+}
+
+func TestAPIClearQueueRefusesWithUnreachableClient(t *testing.T) {
+	q := &fakeQueue{clientErrors: []ClientError{{ClientID: "sab", Message: "connection refused"}}}
+	svc, st := newSvcWithQueue(t, q)
+	r := chi.NewRouter()
+	NewAPI(svc).Mount(r)
+	seedQueueRow(t, st, "h1", "A-GRP")
+
+	req := httptest.NewRequest(http.MethodDelete, "/queue", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503 body=%s", w.Code, w.Body.String())
+	}
+	if rows, _ := st.ListQueue(context.Background()); len(rows) != 1 {
+		t.Fatal("a refused clear must delete nothing")
+	}
+
+	// force=true goes through.
+	req = httptest.NewRequest(http.MethodDelete, "/queue?force=true", nil)
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("forced clear status = %d body=%s", w.Code, w.Body.String())
+	}
+	if rows, _ := st.ListQueue(context.Background()); len(rows) != 0 {
+		t.Fatal("forced clear should have emptied the queue")
+	}
+}
+
+func TestAPIDeleteQueueItemDefaultsToRemovingFromClient(t *testing.T) {
+	q := &fakeQueue{items: []provider.DownloadItem{liveItem("h1")}}
+	svc, st := newSvcWithQueue(t, q)
+	r := chi.NewRouter()
+	NewAPI(svc).Mount(r)
+	row := seedQueueRow(t, st, "h1", "A-GRP")
+
+	req := httptest.NewRequest(http.MethodDelete, "/queue/"+itoa(row.ID), nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
+	}
+	if !q.removed["h1"] {
+		t.Fatal("removeFromClient must default to true")
+	}
+}
+
+func TestAPIDeleteQueueItemHonoursFlags(t *testing.T) {
+	q := &fakeQueue{items: []provider.DownloadItem{liveItem("h1")}}
+	svc, st := newSvcWithQueue(t, q)
+	r := chi.NewRouter()
+	NewAPI(svc).Mount(r)
+	row := seedQueueRow(t, st, "h1", "A-GRP")
+
+	req := httptest.NewRequest(http.MethodDelete,
+		"/queue/"+itoa(row.ID)+"?removeFromClient=false&blocklist=true", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
+	}
+	if q.removed["h1"] {
+		t.Fatal("removeFromClient=false must skip the client call")
+	}
+	bl, _ := st.ListBlocklist(context.Background())
+	if len(bl) != 1 {
+		t.Fatalf("blocklist has %d entries, want 1", len(bl))
+	}
+}
+
+// boolParam falls back to def on both an empty value and an unparseable one.
+// removeFromClient's default is true, and that default is the entire safety
+// net this sub-project exists to protect — if a parse error ever silently
+// flipped it to false, downloads would be orphaned instead of cancelled. This
+// sends a value ParseBool cannot parse and asserts the true default holds.
+func TestAPIDeleteQueueItemUnparseableRemoveFromClientKeepsDefault(t *testing.T) {
+	q := &fakeQueue{items: []provider.DownloadItem{liveItem("h1")}}
+	svc, st := newSvcWithQueue(t, q)
+	r := chi.NewRouter()
+	NewAPI(svc).Mount(r)
+	row := seedQueueRow(t, st, "h1", "A-GRP")
+
+	req := httptest.NewRequest(http.MethodDelete,
+		"/queue/"+itoa(row.ID)+"?removeFromClient=notabool", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
+	}
+	if !q.removed["h1"] {
+		t.Fatal("an unparseable removeFromClient value must fall back to the default (true), not false")
 	}
 }
 

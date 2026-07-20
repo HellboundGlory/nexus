@@ -43,3 +43,20 @@ export type HistoryEvent = {
   message?: string
   createdAt: string
 }
+
+export type Paged<T> = {
+  items: T[]
+  page: number
+  pageSize: number
+  total: number
+}
+
+export type ClientError = {
+  clientId: string
+  message: string
+}
+
+export type ClearResult = {
+  removed: number
+  clientErrors?: ClientError[]
+}

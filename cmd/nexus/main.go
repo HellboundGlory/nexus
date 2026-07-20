@@ -237,13 +237,27 @@ func ensureAdmin(ctx context.Context, st *store.Store, log *slog.Logger) error {
 	return nil
 }
 
-// dlQueueAdapter exposes downloadclient.Service.Queue()'s items (dropping the
-// aggregate error wrapper) so importing's QueueReader interface is satisfied
-// without importing the downloadclient package into internal/importing.
+// dlQueueAdapter maps downloadclient.Service.Queue()'s result onto importing's
+// QueueReader so importing does not import the downloadclient package. The
+// per-client errors are carried across, not dropped: clearing the queue refuses
+// to run against an incomplete picture (spec §3.4).
 type dlQueueAdapter struct{ svc *downloadclient.Service }
 
-func (a dlQueueAdapter) Queue(ctx context.Context) []provider.DownloadItem {
-	return a.svc.Queue(ctx).Items
+func (a dlQueueAdapter) Queue(ctx context.Context) importing.QueueSnapshot {
+	return toQueueSnapshot(a.svc.Queue(ctx))
+}
+
+// toQueueSnapshot maps a download-client queue read onto importing's view of it.
+// The per-client errors are carried across, not dropped: clearing the queue
+// refuses to run against an incomplete picture.
+func toQueueSnapshot(res downloadclient.QueueResult) importing.QueueSnapshot {
+	out := importing.QueueSnapshot{Items: res.Items}
+	for _, e := range res.ClientErrors {
+		out.ClientErrors = append(out.ClientErrors, importing.ClientError{
+			ClientID: e.ClientID, Message: e.Message,
+		})
+	}
+	return out
 }
 
 func (a dlQueueAdapter) Remove(ctx context.Context, clientID, itemID string, deleteData bool) error {

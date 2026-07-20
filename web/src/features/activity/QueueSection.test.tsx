@@ -34,6 +34,7 @@ beforeEach(() => {
   vi.mocked(qualityApi.useQualityDefinitions).mockReturnValue({ data: [{ id: 3, name: "WEBDL-1080p", source: 1, resolution: 3, rank: 3 }] } as never)
   vi.mocked(api.useImportItem).mockReturnValue(mut())
   vi.mocked(api.useRemoveQueueItem).mockReturnValue(mut())
+  vi.mocked(api.useClearQueue).mockReturnValue(mut())
 })
 
 function renderQueue() {
@@ -75,24 +76,56 @@ describe("QueueSection", () => {
     expect(screen.getByText("disk full")).toBeInTheDocument()
   })
 
-  it("removes a row after confirm", async () => {
+  it("removes via the dialog rather than window.confirm", async () => {
     const mutate = vi.fn()
     vi.mocked(api.useRemoveQueueItem).mockReturnValue(mut({ mutate }))
-    vi.mocked(api.useQueue).mockReturnValue({ data: [row({ id: 7 })], isLoading: false, isError: false } as never)
-    vi.spyOn(window, "confirm").mockReturnValue(true)
+    vi.mocked(api.useQueue).mockReturnValue({ data: [row({ id: 1 })], isLoading: false, isError: false } as never)
     renderQueue()
-    await userEvent.click(screen.getByRole("button", { name: /remove/i }))
-    expect(mutate).toHaveBeenCalledWith(7, expect.anything())
+    await userEvent.click(screen.getByRole("button", { name: /^remove$/i })) // row button
+    await userEvent.click(screen.getByRole("button", { name: /^remove$/i })) // dialog confirm
+    expect(mutate).toHaveBeenCalledWith(
+      { id: 1, removeFromClient: true, blocklist: false },
+      expect.anything(),
+    )
   })
 
-  it("does not remove when confirm is cancelled", async () => {
+  it("does not remove when the dialog is cancelled", async () => {
     const mutate = vi.fn()
     vi.mocked(api.useRemoveQueueItem).mockReturnValue(mut({ mutate }))
     vi.mocked(api.useQueue).mockReturnValue({ data: [row({ id: 7 })], isLoading: false, isError: false } as never)
-    vi.spyOn(window, "confirm").mockReturnValue(false)
     renderQueue()
-    await userEvent.click(screen.getByRole("button", { name: /remove/i }))
+    await userEvent.click(screen.getByRole("button", { name: /^remove$/i }))
+    await userEvent.click(screen.getByRole("button", { name: /^cancel$/i }))
     expect(mutate).not.toHaveBeenCalled()
+  })
+
+  it("offers Clear anyway after a 503 refusal", async () => {
+    const mutate = vi.fn((_opts, cbs) => cbs.onError(new ApiError(503, "client_unavailable", "sab: connection refused")))
+    vi.mocked(api.useClearQueue).mockReturnValue(mut({ mutate }))
+    vi.mocked(api.useQueue).mockReturnValue({ data: [row({ id: 1 })], isLoading: false, isError: false } as never)
+    renderQueue()
+    await userEvent.click(screen.getByRole("button", { name: /clear queue/i }))
+    await userEvent.click(screen.getByRole("button", { name: /^clear$/i }))
+    expect(await screen.findByText(/connection refused/i)).toBeTruthy()
+    expect(screen.getByRole("button", { name: /clear anyway/i })).toBeTruthy()
+  })
+
+  it("retries with force after clicking Clear anyway", async () => {
+    const mutate = vi.fn((opts: { force?: boolean }, cbs) => {
+      if (!opts.force) {
+        cbs.onError(new ApiError(503, "client_unavailable", "sab: connection refused"))
+      } else {
+        cbs.onSuccess({ removed: 1 })
+      }
+    })
+    vi.mocked(api.useClearQueue).mockReturnValue(mut({ mutate }))
+    vi.mocked(api.useQueue).mockReturnValue({ data: [row({ id: 1 })], isLoading: false, isError: false } as never)
+    renderQueue()
+    await userEvent.click(screen.getByRole("button", { name: /clear queue/i }))
+    await userEvent.click(screen.getByRole("button", { name: /^clear$/i }))
+    await screen.findByRole("button", { name: /clear anyway/i })
+    await userEvent.click(screen.getByRole("button", { name: /clear anyway/i }))
+    expect(mutate).toHaveBeenLastCalledWith({ force: true }, expect.anything())
   })
 
   it("surfaces an import error as a toast", async () => {

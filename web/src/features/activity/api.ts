@@ -4,12 +4,14 @@ import { useEffect } from "react"
 import { apiGet, apiPost, apiDelete } from "@/lib/api"
 import { useActivity } from "@/lib/activity"
 import { shouldRefresh } from "./resolve"
-import type { QueueItem, HistoryEvent, BlocklistEntry } from "./types"
+import type { QueueItem, HistoryEvent, BlocklistEntry, Paged, ClearResult } from "./types"
 
 export const activityKeys = {
   queue: ["queue"] as const,
   history: ["history"] as const,
   blocklist: ["blocklist"] as const,
+  historyPage: (page: number, pageSize: number) => ["history", page, pageSize] as const,
+  blocklistPage: (page: number, pageSize: number) => ["blocklist", page, pageSize] as const,
 }
 
 // /queue enriches each grabbed row with live progress from the download client
@@ -25,10 +27,10 @@ export function useQueue() {
   })
 }
 
-export function useHistory() {
+export function useHistory(page: number, pageSize: number) {
   return useQuery({
-    queryKey: activityKeys.history,
-    queryFn: () => apiGet<HistoryEvent[]>("/history?limit=100"),
+    queryKey: activityKeys.historyPage(page, pageSize),
+    queryFn: () => apiGet<Paged<HistoryEvent>>(`/history?page=${page}&pageSize=${pageSize}`),
   })
 }
 
@@ -46,13 +48,47 @@ export function useImportItem() {
 export function useRemoveQueueItem() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (id: number) => apiDelete<{ ok: boolean }>(`/queue/${id}`),
+    mutationFn: ({ id, removeFromClient, blocklist }: { id: number; removeFromClient: boolean; blocklist: boolean }) =>
+      apiDelete<{ ok: boolean }>(
+        `/queue/${id}?removeFromClient=${removeFromClient}&blocklist=${blocklist}`,
+      ),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: activityKeys.queue })
+      qc.invalidateQueries({ queryKey: activityKeys.blocklist })
+    },
+  })
+}
+
+export function useClearQueue() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ force }: { force?: boolean }) =>
+      apiDelete<ClearResult>(force ? "/queue?force=true" : "/queue"),
     onSuccess: () => qc.invalidateQueries({ queryKey: activityKeys.queue }),
   })
 }
 
-export function useBlocklist() {
-  return useQuery({ queryKey: activityKeys.blocklist, queryFn: () => apiGet<BlocklistEntry[]>("/blocklist") })
+export function useClearHistory() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => apiDelete<{ removed: number }>("/history"),
+    onSuccess: () => qc.invalidateQueries({ queryKey: activityKeys.history }),
+  })
+}
+
+export function useClearBlocklist() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => apiDelete<{ removed: number }>("/blocklist"),
+    onSuccess: () => qc.invalidateQueries({ queryKey: activityKeys.blocklist }),
+  })
+}
+
+export function useBlocklist(page: number, pageSize: number) {
+  return useQuery({
+    queryKey: activityKeys.blocklistPage(page, pageSize),
+    queryFn: () => apiGet<Paged<BlocklistEntry>>(`/blocklist?page=${page}&pageSize=${pageSize}`),
+  })
 }
 
 export function useRemoveBlocklist() {
