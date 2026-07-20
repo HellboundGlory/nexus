@@ -32,7 +32,7 @@ func (s *Service) searchMovie(ctx context.Context, movieID int64) (int, error) {
 	} else if f != nil {
 		return 0, nil // already have a file
 	}
-	activeMovies, _, err := s.activeQueue(ctx)
+	activeMovies, _, _, err := s.activeQueue(ctx)
 	if err != nil {
 		return 0, err
 	}
@@ -80,17 +80,21 @@ func movieQuery(m *store.Movie) provider.Query {
 }
 
 // activeQueue returns the sets of movie ids and episode ids that currently have
-// an in-flight download-queue row (grabbed or importing). Such items were
-// already grabbed but not yet imported (no media file exists yet), so a search
-// must not grab them again — this makes the sweep idempotent and prevents
-// duplicate grabs from concurrent manual+scheduled searches or stalled downloads.
-func (s *Service) activeQueue(ctx context.Context) (movies, episodes map[int64]struct{}, err error) {
+// an in-flight download-queue row (grabbed or importing), plus a per-series
+// count of those rows. Such items were already grabbed but not yet imported (no
+// media file exists yet), so a search must not grab them again — this makes the
+// sweep idempotent and prevents duplicate grabs from concurrent manual+scheduled
+// searches or stalled downloads. seriesInFlight additionally powers the
+// per-series concurrency gate, which is why store.ListQueue must stay unpaged:
+// a paginated read would under-count and silently leak concurrency.
+func (s *Service) activeQueue(ctx context.Context) (movies, episodes map[int64]struct{}, seriesInFlight map[int64]int, err error) {
 	rows, err := s.store.ListQueue(ctx)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	movies = map[int64]struct{}{}
 	episodes = map[int64]struct{}{}
+	seriesInFlight = map[int64]int{}
 	for _, r := range rows {
 		if r.Status != store.QueueGrabbed && r.Status != store.QueueImporting {
 			continue
@@ -98,11 +102,14 @@ func (s *Service) activeQueue(ctx context.Context) (movies, episodes map[int64]s
 		if r.MovieID != nil {
 			movies[*r.MovieID] = struct{}{}
 		}
+		if r.SeriesID != nil {
+			seriesInFlight[*r.SeriesID]++
+		}
 		for _, eid := range r.EpisodeIDs {
 			episodes[eid] = struct{}{}
 		}
 	}
-	return movies, episodes, nil
+	return movies, episodes, seriesInFlight, nil
 }
 
 // profileFor loads the assigned quality profile. ok=false (no error) means the
@@ -164,7 +171,7 @@ func (s *Service) searchSeries(ctx context.Context, seriesID int64) (int, error)
 	if err != nil {
 		return 0, err
 	}
-	_, activeEps, err := s.activeQueue(ctx)
+	_, activeEps, _, err := s.activeQueue(ctx)
 	if err != nil {
 		return 0, err
 	}
@@ -205,7 +212,7 @@ func (s *Service) searchSeasonEntry(ctx context.Context, seriesID int64, seasonN
 	if err != nil {
 		return 0, err
 	}
-	_, activeEps, err := s.activeQueue(ctx)
+	_, activeEps, _, err := s.activeQueue(ctx)
 	if err != nil {
 		return 0, err
 	}
@@ -296,7 +303,7 @@ func (s *Service) searchEpisodeEntry(ctx context.Context, episodeID int64) (int,
 	if err != nil || !ok {
 		return 0, err
 	}
-	_, activeEps, err := s.activeQueue(ctx)
+	_, activeEps, _, err := s.activeQueue(ctx)
 	if err != nil {
 		return 0, err
 	}

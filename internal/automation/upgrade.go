@@ -104,7 +104,7 @@ func (s *Service) upgradeSweep(ctx context.Context, batch int) (int, error) {
 	}
 	cs := buildCooldownSet(events)
 
-	activeMovies, activeEps, err := s.activeQueue(ctx)
+	activeMovies, activeEps, _, err := s.activeQueue(ctx)
 	if err != nil {
 		return 0, err
 	}

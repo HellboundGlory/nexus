@@ -382,3 +382,40 @@ func TestFakeSearcherSatisfiesDetailedSearcher(t *testing.T) {
 		t.Fatalf("indexerErrors = %+v, want the failing indexer named with its message", errs)
 	}
 }
+
+func TestActiveQueueCountsRowsPerSeries(t *testing.T) {
+	st := newStore(t)
+	ctx := context.Background()
+	sid, epIDs := seedSeries(t, st, true, 3)
+
+	// Two in-flight rows for this series, one of each active status.
+	if _, err := st.EnqueueGrab(ctx, store.QueueItem{
+		ClientItemID: "c1", MediaKind: "tv", SeriesID: &sid, EpisodeIDs: []int64{epIDs[0]}, Status: store.QueueGrabbed,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.EnqueueGrab(ctx, store.QueueItem{
+		ClientItemID: "c2", MediaKind: "tv", SeriesID: &sid, EpisodeIDs: []int64{epIDs[1]}, Status: store.QueueImporting,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// A movie row must not be counted against any series.
+	mid := seedMovie(t, st, true, true)
+	if _, err := st.EnqueueGrab(ctx, store.QueueItem{
+		ClientItemID: "c3", MediaKind: "movie", MovieID: &mid, Status: store.QueueGrabbed,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := NewService(st, &fakeSearcher{}, &fakeEnqueuer{}, nil)
+	_, _, inFlight, err := svc.activeQueue(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := inFlight[sid]; got != 2 {
+		t.Fatalf("want 2 in flight for series %d, got %d (map=%v)", sid, got, inFlight)
+	}
+	if len(inFlight) != 1 {
+		t.Fatalf("only the series should appear, got %v", inFlight)
+	}
+}

@@ -272,7 +272,7 @@ func (s *Service) RSSSync(ctx context.Context) (RSSResult, error) {
 		}
 	}
 
-	activeMovies, activeEps, err := s.activeQueue(ctx)
+	activeMovies, activeEps, _, err := s.activeQueue(ctx)
 	if err != nil {
 		return res, err
 	}
