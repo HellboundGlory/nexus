@@ -525,3 +525,68 @@ func (s *Store) GetEpisode(ctx context.Context, id int64) (*Episode, error) {
 	e.Monitored = m != 0
 	return &e, nil
 }
+
+// SeriesAlias is an alternative title for a series, used to match releases whose
+// scene name differs from the primary title (e.g. "Pokémon: Indigo League").
+// Country and Type are TMDB metadata, stored but not interpreted: Type is free
+// text ("season 1", "23th season in Catalan") and is deliberately not parsed.
+type SeriesAlias struct {
+	ID       int64  `json:"id"`
+	SeriesID int64  `json:"seriesId"`
+	Title    string `json:"title"`
+	Country  string `json:"country"`
+	Type     string `json:"type"`
+}
+
+// ReplaceSeriesAliases swaps the whole alias set for one series in a transaction,
+// so a refresh that drops an alias upstream drops it here too. Scoped to the one
+// series: other series' aliases are untouched.
+func (s *Store) ReplaceSeriesAliases(ctx context.Context, seriesID int64, aliases []SeriesAlias) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM series_aliases WHERE series_id=?`, seriesID); err != nil {
+		return err
+	}
+	for _, a := range aliases {
+		if a.Title == "" {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO series_aliases (series_id, title, country, type) VALUES (?, ?, ?, ?)
+			 ON CONFLICT(series_id, title) DO NOTHING`,
+			seriesID, a.Title, a.Country, a.Type); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (s *Store) SeriesAliasesFor(ctx context.Context, seriesID int64) ([]SeriesAlias, error) {
+	return s.scanAliases(ctx, `SELECT id, series_id, title, country, type FROM series_aliases WHERE series_id=? ORDER BY id`, seriesID)
+}
+
+// AllSeriesAliases returns every alias in the library, for building the
+// release-to-series title index in one query rather than one per series.
+func (s *Store) AllSeriesAliases(ctx context.Context) ([]SeriesAlias, error) {
+	return s.scanAliases(ctx, `SELECT id, series_id, title, country, type FROM series_aliases ORDER BY series_id, id`)
+}
+
+func (s *Store) scanAliases(ctx context.Context, q string, args ...any) ([]SeriesAlias, error) {
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []SeriesAlias
+	for rows.Next() {
+		var a SeriesAlias
+		if err := rows.Scan(&a.ID, &a.SeriesID, &a.Title, &a.Country, &a.Type); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}

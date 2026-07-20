@@ -272,3 +272,69 @@ func TestHasMonitoredEpisodes(t *testing.T) {
 		t.Fatal("want false for a series with no episodes at all")
 	}
 }
+
+func TestSeriesAliasesReplaceAndRead(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	sid, err := s.CreateSeries(ctx, Series{TMDBID: 60572, Title: "Pokémon", SortTitle: "pokemon"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := s.CreateSeries(ctx, Series{TMDBID: 220150, Title: "Pokémon Horizons", SortTitle: "pokemon horizons"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ReplaceSeriesAliases(ctx, sid, []SeriesAlias{
+		{Title: "Pokémon: Indigo League", Country: "US", Type: "season 1"},
+		{Title: "Pocket Monsters", Country: "JP"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ReplaceSeriesAliases(ctx, other, []SeriesAlias{{Title: "Pokemon Horizons", Country: "US"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := s.SeriesAliasesFor(ctx, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("want 2 aliases for the series, got %d: %+v", len(got), got)
+	}
+	for _, a := range got {
+		if a.SeriesID != sid {
+			t.Fatalf("alias scoped to the wrong series: %+v", a)
+		}
+	}
+
+	// Replace is a full replacement, scoped to one series: the other series' row survives.
+	if err := s.ReplaceSeriesAliases(ctx, sid, []SeriesAlias{{Title: "Pokemon", Country: "US", Type: "alternative spelling"}}); err != nil {
+		t.Fatal(err)
+	}
+	got, err = s.SeriesAliasesFor(ctx, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Title != "Pokemon" {
+		t.Fatalf("replace should leave exactly the new alias, got %+v", got)
+	}
+	all, err := s.AllSeriesAliases(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("replace must not touch other series: want 2 rows library-wide, got %d: %+v", len(all), all)
+	}
+
+	// Deleting the series cascades its aliases away.
+	if err := s.DeleteSeries(ctx, sid); err != nil {
+		t.Fatal(err)
+	}
+	all, err = s.AllSeriesAliases(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 1 || all[0].SeriesID != other {
+		t.Fatalf("aliases must cascade on series delete, got %+v", all)
+	}
+}
