@@ -391,3 +391,25 @@ func TestUpgradeSweepUpgradesMonitoredEpisodesOfUnmonitoredSeries(t *testing.T) 
 		t.Fatalf("upgrades must follow episode monitoring, not the series flag: n=%d reqs=%d", n, len(fe.reqs))
 	}
 }
+
+// An upgrade search hits the same loosely-matched q, so a better-scoring
+// episode of a DIFFERENT show must not be swapped in over the real file.
+func TestUpgradeEpisodeRejectsReleaseFromADifferentShow(t *testing.T) {
+	st := newStore(t)
+	ctx := context.Background()
+	seedUpgradableSeries(t, st, 1)
+	fs := &fakeSearcher{releases: []provider.Release{{
+		Title:       "The.Show.Trainer.Tour.S01E01.1080p.BluRay.x264-GRP",
+		DownloadURL: "wrong", Protocol: provider.ProtocolUsenet,
+	}}}
+	fe := &fakeEnqueuer{}
+	svc := NewService(st, fs, fe, nil)
+
+	n, err := svc.UpgradeSweep(ctx, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 || len(fe.reqs) != 0 {
+		t.Fatalf("an upgrade must not take a different show's release: n=%d reqs=%+v", n, fe.reqs)
+	}
+}

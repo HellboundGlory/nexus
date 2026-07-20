@@ -5,6 +5,11 @@ import (
 	"log/slog"
 	"regexp"
 	"strings"
+	"unicode"
+
+	"golang.org/x/text/runes"
+	"golang.org/x/text/transform"
+	"golang.org/x/text/unicode/norm"
 
 	"github.com/hellboundg/nexus/internal/core/provider"
 	"github.com/hellboundg/nexus/internal/core/store"
@@ -18,12 +23,29 @@ var (
 	reSeasonTok = regexp.MustCompile(`(?i)\bS\d{1,2}\b`)
 )
 
-// normTitle lowercases a title and collapses every run of non-alphanumeric
-// characters to a single space, so "The.Matrix" and "The Matrix" compare equal.
+// normTitle lowercases a title, strips diacritics, and collapses every run of
+// non-alphanumeric characters to a single space, so "The.Matrix" and
+// "The Matrix" compare equal.
+//
+// The accent fold is load-bearing, not cosmetic: reNonAlnum is ASCII-only, so
+// without it "Pokémon" collapses to "pok mon" and would never match its own
+// releases, whose scene names are ASCII ("Pokemon.S01E01..."). That silently
+// broke RSS matching for every accented series. Mirrors the same NFD fold the
+// indexer applies when building a search term.
 func normTitle(s string) string {
-	s = strings.ToLower(s)
+	s = foldAccents(strings.ToLower(s))
 	s = reNonAlnum.ReplaceAllString(s, " ")
 	return strings.TrimSpace(s)
+}
+
+// foldAccents decomposes runes and drops combining marks: "é" -> "e".
+func foldAccents(s string) string {
+	out, _, err := transform.String(
+		transform.Chain(norm.NFD, runes.Remove(runes.In(unicode.Mn)), norm.NFC), s)
+	if err != nil {
+		return s
+	}
+	return out
 }
 
 // normIMDb strips the "tt" prefix so a release id (already tt-stripped by the
