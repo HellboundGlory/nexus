@@ -104,7 +104,7 @@ func (s *Service) upgradeSweep(ctx context.Context, batch int) (int, error) {
 	}
 	cs := buildCooldownSet(events)
 
-	activeMovies, activeEps, _, err := s.activeQueue(ctx)
+	activeMovies, activeEps, inFlight, err := s.activeQueue(ctx)
 	if err != nil {
 		return 0, err
 	}
@@ -170,7 +170,11 @@ func (s *Service) upgradeSweep(ctx context.Context, batch int) (int, error) {
 		if err != nil {
 			return total, err
 		}
+		bud := newBudget(cfg.MaxConcurrentPerSeries, inFlight[se.ID])
 		for _, e := range eps {
+			if !bud.allows() {
+				break
+			}
 			if processed >= batch {
 				return total, nil
 			}
@@ -192,6 +196,9 @@ func (s *Service) upgradeSweep(ctx context.Context, batch int) (int, error) {
 			if err != nil {
 				slog.Warn("automation: upgrade episode search failed", "episodeId", e.ID, "err", err)
 				continue
+			}
+			if grabbed > 0 {
+				bud.take()
 			}
 			total += grabbed
 		}
