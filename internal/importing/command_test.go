@@ -253,6 +253,50 @@ func TestImportCompletedResearchesSeriesOncePerTick(t *testing.T) {
 	}
 }
 
+// Regression: a SOFT import failure (e.g. the output directory has no video
+// files) routes through fail(), which sets the row to QueueFailed and returns
+// nil — it does NOT delete the queue row. The success re-search hook must not
+// fire in this case: the release was never blocklisted and the episode is
+// still missing, so an immediate re-search could re-grab the very same
+// failing release. A genuine success (row actually deleted) must still fire —
+// see TestImportCompletedResearchesSeriesOncePerTick above for that case.
+func TestSoftImportFailureDoesNotTriggerResearch(t *testing.T) {
+	ctx := context.Background()
+	fq := &fakeQueue{}
+	svc, st := newSvcWithQueue(t, fq)
+	sid, epID := seedSeriesWithProfile(t, st)
+	res := &fakeResearcher{}
+	svc.SetResearcher(res)
+
+	// Output dir exists but has NO video files -> ImportItem routes through fail().
+	dl := t.TempDir()
+	q, err := st.EnqueueGrab(ctx, store.QueueItem{
+		DownloadClientID: "c1", ClientItemID: "h1", Protocol: "usenet",
+		SourceTitle: "The.Show.S01E01.1080p.BluRay.x264-GRP", MediaKind: "tv",
+		SeriesID: &sid, EpisodeIDs: []int64{epID}, QualityID: 9, Status: store.QueueGrabbed,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fq.items = []provider.DownloadItem{{
+		ID: "h1", DownloadClientID: "c1", Status: provider.StatusCompleted, OutputPath: dl,
+	}}
+
+	if err := svc.ImportCompleted(ctx); err != nil {
+		t.Fatal(err)
+	}
+	row, err := st.GetQueueItem(ctx, q.ID)
+	if err != nil {
+		t.Fatalf("row should still exist (soft failure retains it as QueueFailed), got err=%v", err)
+	}
+	if row.Status != store.QueueFailed {
+		t.Fatalf("expected QueueFailed, got %q", row.Status)
+	}
+	if len(res.series) != 0 {
+		t.Fatalf("soft import failure must NOT trigger ResearchSeries, got %v", res.series)
+	}
+}
+
 func TestReconcileFailedDownloadBlocklistsAndRetries(t *testing.T) {
 	st := newTestStore(t)
 	ctx := context.Background()

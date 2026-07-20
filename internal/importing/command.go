@@ -2,6 +2,7 @@ package importing
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 
 	"github.com/hellboundg/nexus/internal/core/command"
@@ -11,10 +12,16 @@ import (
 
 // ImportCompleted imports every grabbed queue row whose client item is
 // completed, and handles rows whose client item has failed (blocklist + retry).
-// After a successful TV import the series is re-searched, so the next episode is
+// After a TV import actually lands — the queue row is gone, because ImportItem
+// deletes it on success — the series is re-searched, so the next episode is
 // grabbed as soon as the slot frees rather than waiting for the next scheduled
-// sweep. Series ids are collected and researched once per tick — firing per row
-// would launch several concurrent searches racing for the same freed slot.
+// sweep. A SOFT import failure (e.g. no video files found, incomplete import)
+// routes through fail(), which sets the row to QueueFailed and retains it
+// instead of deleting it, so it does NOT trigger a re-search: the release was
+// never blocklisted and the episode is still missing, so an immediate
+// re-search could just re-grab the same failing release. Series ids are
+// collected and researched once per tick — firing per row would launch
+// several concurrent searches racing for the same freed slot.
 func (s *Service) ImportCompleted(ctx context.Context) error {
 	rows, err := s.store.QueueByStatus(ctx, store.QueueGrabbed)
 	if err != nil {
@@ -36,10 +43,16 @@ func (s *Service) ImportCompleted(ctx context.Context) error {
 			if err := s.ImportItem(ctx, row.ID); err != nil {
 				return err
 			}
-			if row.SeriesID != nil {
-				if _, dup := seen[*row.SeriesID]; !dup {
-					seen[*row.SeriesID] = struct{}{}
-					imported = append(imported, *row.SeriesID)
+			// A successful import deletes the queue row; a soft failure
+			// (fail()) retains it as QueueFailed. Gate the re-search on the
+			// row actually being gone rather than on err == nil, since
+			// fail() itself returns nil.
+			if _, gerr := s.store.GetQueueItem(ctx, row.ID); errors.Is(gerr, store.ErrNotFound) {
+				if row.SeriesID != nil {
+					if _, dup := seen[*row.SeriesID]; !dup {
+						seen[*row.SeriesID] = struct{}{}
+						imported = append(imported, *row.SeriesID)
+					}
 				}
 			}
 		case provider.StatusFailed:
