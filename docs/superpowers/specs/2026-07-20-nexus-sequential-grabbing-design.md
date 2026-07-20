@@ -233,6 +233,23 @@ MaxConcurrentPerSeries int `json:"maxConcurrentPerSeries"`
 section in the frontend, alongside the other interval/batch fields. No new settings
 tab, no schema change — the automation config is already persisted as a single blob.
 
+**⚠️ `Service.Config()` must NOT normalize this field.** Every existing field in
+`Config()` (`internal/automation/config.go`) is clamped on read:
+
+```go
+if c.MissingSearchBatchSize <= 0 { c.MissingSearchBatchSize = d.MissingSearchBatchSize }
+```
+
+with the stated rationale "so a bad value can't disable the sweep or make it unbounded".
+`MaxConcurrentPerSeries` is the deliberate exception: `0` **must** survive the round trip,
+because `0` is the documented off switch (§4.2). Adding the sibling clause by reflex —
+the natural thing to do when following the surrounding pattern — silently converts a
+disabled gate back into a limit of 1, and nothing else in the system would reveal it.
+
+This requires an explicit test: persist `MaxConcurrentPerSeries: 0` via `SetConfig`, read
+it back through `Config()`, and assert it is still `0`. The field also carries a comment
+in the struct stating why it is exempt.
+
 ### 4.8 Error handling summary
 
 | Situation | Behaviour |
@@ -278,7 +295,10 @@ visibly differ.**
   `series` slice.
 - Successful import of 3 rows for one series in one tick → `ResearchSeries` called
   exactly once.
-- Movie import success → no research call.
+- A movie row never routes to `ResearchSeries` — asserted on the existing movie
+  *failure* test. The movie *success* case needs no test: `ImportCompleted` only records
+  a series id under `if row.SeriesID != nil`, which is nil for every movie row, making it
+  structurally unreachable rather than merely untested.
 - `TestListQueueReturnsAllRowsUnpaged` continues to pass (§3.1).
 
 ## 6. Risks
