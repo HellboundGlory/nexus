@@ -9,11 +9,18 @@ import (
 	"github.com/hellboundg/nexus/internal/core/store"
 )
 
-// seedQueueRow inserts a grabbed queue row whose client item id is itemID.
+// seedQueueRow inserts a grabbed queue row whose client item id is itemID. The
+// row's DownloadClientID is deliberately left empty: this mirrors production
+// reality for every automation-grabbed row (internal/automation/search.go
+// builds its EnqueueRequest with no ClientID), and matchItem only constrains
+// on the row's client id when it is non-empty. The live queue item (see
+// liveItem below) carries the real client id instead, so a test asserting
+// Remove was called with the STORED row's client id — rather than the LIVE
+// item's — fails loudly instead of silently passing.
 func seedQueueRow(t *testing.T, st *store.Store, itemID, title string) store.QueueItem {
 	t.Helper()
 	row, err := st.EnqueueGrab(context.Background(), store.QueueItem{
-		DownloadClientID: "sab", ClientItemID: itemID, Protocol: "usenet",
+		DownloadClientID: "", ClientItemID: itemID, Protocol: "usenet",
 		SourceTitle: title, MediaKind: "movie", Status: store.QueueGrabbed,
 	})
 	if err != nil {
@@ -22,6 +29,10 @@ func seedQueueRow(t *testing.T, st *store.Store, itemID, title string) store.Que
 	return row
 }
 
+// liveItem is the live download-client item matched against a seeded queue
+// row. Its DownloadClientID ("sab") is intentionally the only place that
+// client id lives — the stored row's is empty — so Remove must be routed
+// using THIS value, not the row's.
 func liveItem(itemID string) provider.DownloadItem {
 	return provider.DownloadItem{ID: itemID, DownloadClientID: "sab", Status: provider.StatusDownloading}
 }
@@ -39,6 +50,13 @@ func TestRemoveQueueItemRemovesFromClientByDefault(t *testing.T) {
 	}
 	if !q.removedDeleteData["h1"] {
 		t.Fatal("Remove must be called with deleteData: true, so partial files go too")
+	}
+	// The stored row has DownloadClientID "" (mirrors an automation-grabbed
+	// row); the live item's client id is "sab". Remove must be routed with the
+	// LIVE item's client id, never the row's — a row enqueued without an
+	// explicit client override has nothing else to go on.
+	if got := q.removedClientID["h1"]; got != "sab" {
+		t.Fatalf("Remove was called with clientID %q, want the live item's %q", got, "sab")
 	}
 	if _, err := st.GetQueueItem(context.Background(), row.ID); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("queue row still present, err = %v", err)
@@ -230,6 +248,12 @@ func TestClearQueueRemovesEveryRowAndItsDownload(t *testing.T) {
 	}
 	if !q.removedDeleteData["h1"] || !q.removedDeleteData["h2"] {
 		t.Fatalf("Remove must be called with deleteData: true, so partial files go too, got %v", q.removedDeleteData)
+	}
+	// Both rows were seeded with DownloadClientID "" (automation-grabbed rows
+	// never record one); the live items carry "sab". ClearQueue must route
+	// Remove using the LIVE item's client id.
+	if q.removedClientID["h1"] != "sab" || q.removedClientID["h2"] != "sab" {
+		t.Fatalf("Remove routed with clientID %v, want the live items' %q for both", q.removedClientID, "sab")
 	}
 	if rows, _ := st.ListQueue(context.Background()); len(rows) != 0 {
 		t.Fatalf("%d rows left, want 0", len(rows))

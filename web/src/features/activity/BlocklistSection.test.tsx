@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { ToastProvider } from "@/lib/toast"
+import { ApiError } from "@/lib/api"
 import { BlocklistSection } from "./BlocklistSection"
 import * as api from "./api"
 import * as qualityApi from "@/features/settings/qualityApi"
@@ -91,5 +92,44 @@ describe("BlocklistSection", () => {
     await userEvent.click(screen.getByRole("button", { name: /clear blocklist/i }))
     await userEvent.click(screen.getByRole("button", { name: /^clear$/i }))
     expect(mutate).toHaveBeenCalled()
+  })
+
+  it("toasts and keeps the dialog open when clearing fails", async () => {
+    const mutate = vi.fn((_vars, opts) => opts.onError(new ApiError(500, "internal", "boom")))
+    vi.mocked(api.useClearBlocklist).mockReturnValue(mut({ mutate }))
+    vi.mocked(api.useBlocklist).mockReturnValue({
+      data: paged([entry({}), entry({ id: 2 })], { total: 2 }),
+      isLoading: false, isError: false,
+    } as never)
+    renderBlocklist()
+    await userEvent.click(screen.getByRole("button", { name: /clear blocklist/i }))
+    await userEvent.click(screen.getByRole("button", { name: /^clear$/i }))
+    expect(await screen.findByText("boom")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /^clear$/i })).toBeInTheDocument()
+  })
+
+  // Spec §4.3: an overshot page must still show the pagination control so the
+  // user can get back, even though the current page has no rows.
+  it("still shows pagination when the current page is past the end", () => {
+    vi.mocked(api.useBlocklist).mockReturnValue({
+      data: paged([], { total: 5, page: 2, pageSize: 5 }),
+      isLoading: false, isError: false,
+    } as never)
+    renderBlocklist()
+    expect(screen.getByText(/no blocklisted releases/i)).toBeInTheDocument()
+    expect(screen.getByText(/showing/i)).toBeInTheDocument()
+  })
+
+  it("resets to page 1 when the page size changes", async () => {
+    vi.mocked(api.useBlocklist).mockReturnValue({
+      data: paged([entry({}), entry({ id: 2 })], { total: 60 }),
+      isLoading: false, isError: false,
+    } as never)
+    renderBlocklist()
+    await userEvent.click(screen.getByRole("button", { name: /next/i }))
+    expect(vi.mocked(api.useBlocklist)).toHaveBeenLastCalledWith(2, 50)
+
+    await userEvent.selectOptions(screen.getByLabelText(/per page/i), "100")
+    expect(vi.mocked(api.useBlocklist)).toHaveBeenLastCalledWith(1, 100)
   })
 })

@@ -27,7 +27,6 @@ export function Pagination({
         <label className="flex items-center gap-1">
           <span>Per page</span>
           <select
-            aria-label="Rows per page"
             value={pageSize}
             onChange={(e) => onPageSizeChange(Number(e.target.value))}
             className="rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-1 py-1 text-xs"

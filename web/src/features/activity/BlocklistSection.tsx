@@ -34,7 +34,10 @@ export function BlocklistSection() {
   }
 
   const onClear = () => {
-    clearBlocklist.mutate(undefined, { onSuccess: () => { setConfirmOpen(false); setPage(1) } })
+    clearBlocklist.mutate(undefined, {
+      onSuccess: () => { setConfirmOpen(false); setPage(1) },
+      onError: (e) => toast(e instanceof ApiError ? e.message : "Clear failed", { variant: "error" }),
+    })
   }
 
   return (
@@ -54,49 +57,50 @@ export function BlocklistSection() {
       {rows.length === 0 ? (
         <div className="text-sm text-[var(--color-muted)]">No blocklisted releases.</div>
       ) : (
-        <>
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-[var(--color-border)] text-left text-xs uppercase tracking-wide text-[var(--color-muted)]">
-                <th className="py-2 pr-4">Release</th>
-                <th className="py-2 pr-4">For</th>
-                <th className="py-2 pr-4">Quality</th>
-                <th className="py-2 pr-4">Reason</th>
-                <th className="py-2 pr-4">Date</th>
-                <th className="py-2 pr-4 text-right">Actions</th>
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-[var(--color-border)] text-left text-xs uppercase tracking-wide text-[var(--color-muted)]">
+              <th className="py-2 pr-4">Release</th>
+              <th className="py-2 pr-4">For</th>
+              <th className="py-2 pr-4">Quality</th>
+              <th className="py-2 pr-4">Reason</th>
+              <th className="py-2 pr-4">Date</th>
+              <th className="py-2 pr-4 text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((b) => (
+              <tr key={b.id} className="border-b border-[var(--color-border)] align-top last:border-b-0">
+                <td className="py-2.5 pr-4 font-medium">{b.sourceTitle}</td>
+                <td className="py-2.5 pr-4 text-[var(--color-muted)]">{b.title || "—"}</td>
+                <td className="py-2.5 pr-4">{qualityName(b.qualityId, defs.data)}</td>
+                <td className="py-2.5 pr-4 text-[var(--color-muted)]">{b.reason || "—"}</td>
+                <td className="whitespace-nowrap py-2.5 pr-4 text-[var(--color-muted)]">
+                  {relativeTime(new Date(b.createdAt).getTime())}
+                </td>
+                <td className="whitespace-nowrap py-2.5 pr-4 text-right">
+                  <button
+                    onClick={() => onRemove(b.id)}
+                    className="rounded border border-[var(--color-border)] px-2 py-1 text-xs text-[var(--color-warn)] hover:border-[var(--color-warn)]"
+                  >
+                    Remove
+                  </button>
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {rows.map((b) => (
-                <tr key={b.id} className="border-b border-[var(--color-border)] align-top last:border-b-0">
-                  <td className="py-2.5 pr-4 font-medium">{b.sourceTitle}</td>
-                  <td className="py-2.5 pr-4 text-[var(--color-muted)]">{b.title || "—"}</td>
-                  <td className="py-2.5 pr-4">{qualityName(b.qualityId, defs.data)}</td>
-                  <td className="py-2.5 pr-4 text-[var(--color-muted)]">{b.reason || "—"}</td>
-                  <td className="whitespace-nowrap py-2.5 pr-4 text-[var(--color-muted)]">
-                    {relativeTime(new Date(b.createdAt).getTime())}
-                  </td>
-                  <td className="whitespace-nowrap py-2.5 pr-4 text-right">
-                    <button
-                      onClick={() => onRemove(b.id)}
-                      className="rounded border border-[var(--color-border)] px-2 py-1 text-xs text-[var(--color-warn)] hover:border-[var(--color-warn)]"
-                    >
-                      Remove
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <Pagination
-            page={page}
-            pageSize={pageSize}
-            total={total}
-            onPageChange={setPage}
-            onPageSizeChange={(s) => { setPageSize(s); setPage(1) }}
-          />
-        </>
+            ))}
+          </tbody>
+        </table>
       )}
+
+      {total > 0 ? (
+        <Pagination
+          page={page}
+          pageSize={pageSize}
+          total={total}
+          onPageChange={setPage}
+          onPageSizeChange={(s) => { setPageSize(s); setPage(1) }}
+        />
+      ) : null}
 
       <ClearConfirmDialog
         open={confirmOpen}

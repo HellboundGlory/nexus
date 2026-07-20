@@ -194,6 +194,30 @@ func TestAPIDeleteQueueItemHonoursFlags(t *testing.T) {
 	}
 }
 
+// boolParam falls back to def on both an empty value and an unparseable one.
+// removeFromClient's default is true, and that default is the entire safety
+// net this sub-project exists to protect — if a parse error ever silently
+// flipped it to false, downloads would be orphaned instead of cancelled. This
+// sends a value ParseBool cannot parse and asserts the true default holds.
+func TestAPIDeleteQueueItemUnparseableRemoveFromClientKeepsDefault(t *testing.T) {
+	q := &fakeQueue{items: []provider.DownloadItem{liveItem("h1")}}
+	svc, st := newSvcWithQueue(t, q)
+	r := chi.NewRouter()
+	NewAPI(svc).Mount(r)
+	row := seedQueueRow(t, st, "h1", "A-GRP")
+
+	req := httptest.NewRequest(http.MethodDelete,
+		"/queue/"+itoa(row.ID)+"?removeFromClient=notabool", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
+	}
+	if !q.removed["h1"] {
+		t.Fatal("an unparseable removeFromClient value must fall back to the default (true), not false")
+	}
+}
+
 func TestAPIEnqueueRejectMaps400(t *testing.T) {
 	r, st := newTestAPI(t)
 	sid, epID := seedSeriesWithProfile(t, st)

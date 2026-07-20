@@ -27,26 +27,31 @@ type fakeQueue struct {
 	items             []provider.DownloadItem
 	clientErrors      []ClientError
 	removed           map[string]bool
-	removedDeleteData map[string]bool // deleteData flag Remove was called with, keyed by itemID
-	removeErr         error           // when non-nil, every Remove call fails with it
+	removedDeleteData map[string]bool   // deleteData flag Remove was called with, keyed by itemID
+	removedClientID   map[string]string // clientID Remove was actually called with, keyed by itemID
+	removeErr         error             // when non-nil, every Remove call fails with it
 }
 
 func (f *fakeQueue) Queue(context.Context) QueueSnapshot {
 	return QueueSnapshot{Items: f.items, ClientErrors: f.clientErrors}
 }
 
-func (f *fakeQueue) Remove(_ context.Context, _, itemID string, deleteData bool) error {
+func (f *fakeQueue) Remove(_ context.Context, clientID, itemID string, deleteData bool) error {
 	if f.removed == nil {
 		f.removed = map[string]bool{}
 	}
 	if f.removedDeleteData == nil {
 		f.removedDeleteData = map[string]bool{}
 	}
+	if f.removedClientID == nil {
+		f.removedClientID = map[string]string{}
+	}
 	if f.removeErr != nil {
 		return f.removeErr
 	}
 	f.removed[itemID] = true
 	f.removedDeleteData[itemID] = deleteData
+	f.removedClientID[itemID] = clientID
 	return nil
 }
 
