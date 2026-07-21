@@ -400,6 +400,9 @@ func (s *Service) searchEpisode(ctx context.Context, se *store.Series, e store.E
 		if !releaseIsForSeries(se, c.Parsed, ti) {
 			continue
 		}
+		if episodeTitleContradicts(e.Title, c.Parsed) {
+			continue
+		}
 		if c.Parsed.Season == e.SeasonNumber && containsInt(c.Parsed.Episodes, e.EpisodeNumber) {
 			covering = append(covering, c)
 		}

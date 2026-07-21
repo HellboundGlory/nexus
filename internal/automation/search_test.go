@@ -1109,6 +1109,78 @@ func TestSearchEpisodeAcceptsAliasNamedRelease(t *testing.T) {
 	}
 }
 
+// Seeded from the real production incident: a series monitoring Pokemon (1997)
+// grabbed and imported episodes of Pokemon Horizons and Pokemon Trainer Tour.
+// The episode-title TEXT below is the real feed data -- the discriminating signal.
+// Quality strings are adjusted so BOTH the wrong-show (Horizons) and right-show
+// releases clear hdProfile(), making the episode-title contradiction the ONLY
+// thing that can separate them (the real DVDRip right-show release was SD and
+// quality-ineligible under the user's 1080p profile; that is a separate,
+// out-of-scope quality-profile issue, not what this test pins).
+func TestSagaPokemonGrabsOnlyTheRightShow(t *testing.T) {
+	st := newStore(t)
+	ctx := context.Background()
+	prof, err := st.CreateQualityProfile(ctx, hdProfile())
+	if err != nil {
+		t.Fatal(err)
+	}
+	sid, err := st.CreateSeries(ctx, store.Series{TMDBID: 60572, Title: "Pokémon", Monitored: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetSeriesQualityProfileID(ctx, sid, &prof.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.ReplaceSeriesAliases(ctx, sid, []store.SeriesAlias{
+		{Title: "Pokémon: Indigo League", Country: "US", Type: "season 1"},
+		{Title: "Pokemon", Country: "US", Type: "alternative spelling"},
+		{Title: "Pocket Monsters", Country: "JP"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertSeason(ctx, store.Season{SeriesID: sid, SeasonNumber: 1, Monitored: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertEpisode(ctx, store.Episode{
+		SeriesID: sid, SeasonNumber: 1, EpisodeNumber: 1, Monitored: true,
+		Title: "Pokémon - I Choose You!", AirDate: "1997-04-01",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	eps, err := st.ListEpisodes(ctx, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fs := &fakeSearcher{releases: []provider.Release{
+		// WRONG show (Horizons): normalizes to the SAME title "pokemon" as the
+		// monitored series AND is the highest quality (Bluray-1080p), so it passes
+		// the title check and outranks the right release -- ONLY the episode-title
+		// contradiction ("The Pendant..." vs stored "Pokemon - I Choose You!") can
+		// stop it. Real episode-title text; quality set to Bluray so it is eligible.
+		{Title: "Pokemon.S01E01.The.Pendant.That.Starts.It.All.Part.1.1080p.BluRay.x265-iVy", DownloadURL: "horizons", Protocol: provider.ProtocolUsenet},
+		// WRONG show (Trainer Tour): rejected by the title check (different title).
+		{Title: "Pokemon.Trainer.Tour.S01E01.Creative.Evolution.1080p.AMZN.WEB-DL.H.264-BurCyg", DownloadURL: "trainertour", Protocol: provider.ProtocolUsenet},
+		// RIGHT show: primary-title match ("pokemon"), NO episode title to
+		// contradict, quality-eligible (WEBDL-1080p, lower than the wrong Bluray so
+		// it only wins once the contradiction rejects Horizons).
+		{Title: "Pokemon.S01E01.1080p.WEB-DL.x264-QCF", DownloadURL: "correct", Protocol: provider.ProtocolUsenet},
+	}}
+	fe := &fakeEnqueuer{}
+	svc := NewService(st, fs, fe, nil)
+
+	n, err := svc.SearchEpisode(ctx, eps[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 || len(fe.reqs) != 1 {
+		t.Fatalf("want exactly 1 grab, got n=%d reqs=%+v", n, fe.reqs)
+	}
+	if fe.reqs[0].DownloadURL != "correct" {
+		t.Fatalf("must grab the right show's release, got %q", fe.reqs[0].DownloadURL)
+	}
+}
+
 func TestSearchSeasonPackAcceptsAliasNamedRelease(t *testing.T) {
 	st := newStore(t)
 	ctx := context.Background()

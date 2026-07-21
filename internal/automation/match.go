@@ -2,6 +2,7 @@ package automation
 
 import (
 	"context"
+	"strings"
 
 	"github.com/hellboundg/nexus/internal/core/store"
 	"github.com/hellboundg/nexus/internal/parsing"
@@ -93,4 +94,30 @@ func releaseIsForSeries(se *store.Series, p parsing.ParsedRelease, ti titleIndex
 // match via this path -- a safe missed grab, not a wrong one.
 func cleanedReleaseTitle(title string) string {
 	return reSeasonTok.ReplaceAllString(title, " ")
+}
+
+// episodeTitleContradicts reports whether a release's episode title positively
+// contradicts the stored one.
+//
+// This is the only automatic signal that separates two shows sharing a scene
+// name: "Pokemon.S01E01.The.Pendant.That.Starts.It.All" is Pokemon Horizons,
+// while the monitored series' S01E01 is "Pokemon - I Choose You!". No
+// series-title comparison can tell them apart.
+//
+// It vetoes ONLY on positive evidence. An absent or unrecognisable episode title
+// on either side yields false, because a false rejection means nothing downloads
+// while a missed signal merely falls through to the other checks.
+func episodeTitleContradicts(stored string, p parsing.ParsedRelease) bool {
+	got := normTitle(p.EpisodeTitle)
+	want := normTitle(stored)
+	if got == "" || want == "" {
+		return false
+	}
+	// Either containing the other counts as agreement: release names abbreviate
+	// ("I Choose You" vs "Pokemon - I Choose You!") and may carry a trailing
+	// release-group suffix.
+	if strings.Contains(want, got) || strings.Contains(got, want) {
+		return false
+	}
+	return true
 }

@@ -67,3 +67,31 @@ func TestReleaseIsForSeriesMatchesYearTitledSeries(t *testing.T) {
 		t.Fatal("a year-titled series must match its own release")
 	}
 }
+
+func TestEpisodeTitleContradicts(t *testing.T) {
+	const stored = "Pokémon - I Choose You!"
+	cases := []struct {
+		name  string
+		title string
+		want  bool
+	}{
+		{"different show's episode title", "Pokemon.S01E01.The.Pendant.That.Starts.It.All.Part.1.1080p.WEBRip.x265-iVy", true},
+		{"matching episode title", "Pokemon.S01E01.I.Choose.You.1080p.WEB-DL.x264-GRP", false},
+		{"no episode title in the release", "Pokemon.S01E01.DVDRip.x264-QCF", false},
+		{"technical tokens only", "Pokemon.S01E01.PDTV.HebDub.XviD-Sweet-Star", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := episodeTitleContradicts(stored, parsedTV(tc.title)); got != tc.want {
+				t.Fatalf("episodeTitleContradicts(%q) = %v, want %v", tc.title, got, tc.want)
+			}
+		})
+	}
+}
+
+// With no stored episode title there is nothing to contradict.
+func TestEpisodeTitleContradictsNeedsBothSides(t *testing.T) {
+	if episodeTitleContradicts("", parsedTV("Pokemon.S01E01.The.Pendant.That.Starts.It.All.1080p.x265-iVy")) {
+		t.Fatal("an empty stored title must never contradict")
+	}
+}

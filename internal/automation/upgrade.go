@@ -255,6 +255,9 @@ func (s *Service) upgradeEpisode(ctx context.Context, se *store.Series, e store.
 		if !releaseIsForSeries(se, c.Parsed, ti) {
 			continue
 		}
+		if episodeTitleContradicts(e.Title, c.Parsed) {
+			continue
+		}
 		if c.Parsed.Season == e.SeasonNumber && containsInt(c.Parsed.Episodes, e.EpisodeNumber) {
 			covering = append(covering, c)
 		}
