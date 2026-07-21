@@ -493,6 +493,9 @@ func (s *Service) rssPlaceTV(ctx context.Context, se *store.Series, eps []store.
 			var covering []Candidate
 			for _, c := range ranked {
 				if c.Parsed.Season == season && containsInt(c.Parsed.Episodes, e.EpisodeNumber) {
+					if episodeTitleContradicts(e.Title, c.Parsed) {
+						continue
+					}
 					covering = append(covering, c)
 				}
 			}
