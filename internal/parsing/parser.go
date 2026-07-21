@@ -3,6 +3,7 @@ package parsing
 import (
 	"regexp"
 	"strings"
+	"unicode"
 
 	"github.com/hellboundg/nexus/internal/core/provider"
 )
@@ -28,6 +29,7 @@ var (
 		{regexp.MustCompile(`(?i)\b(web-?dl|webdl)\b`), SourceWEBDL},
 		{regexp.MustCompile(`(?i)\bweb-?rip\b`), SourceWEBRip},
 		{regexp.MustCompile(`(?i)\bhdtv\b`), SourceHDTV},
+		{regexp.MustCompile(`(?i)\b(pdtv|sdtv)\b`), SourceHDTV},
 		{regexp.MustCompile(`(?i)\b(dvdrip|dvd-?r|dvd)\b`), SourceDVD},
 		{regexp.MustCompile(`(?i)\b(hdts|telesync|ts)\b`), SourceTS},
 		{regexp.MustCompile(`(?i)\b(hdcam|cam)\b`), SourceCAM},
@@ -79,6 +81,7 @@ func Parse(title string, kind provider.MediaKind) ParsedRelease {
 					p.Episodes = append(p.Episodes, e)
 				}
 			}
+			p.EpisodeTitle = episodeTitleFrom(title[reSeasonEp.FindStringIndex(title)[1]:])
 		} else if m := reSeasonPack.FindStringSubmatch(title); m != nil {
 			// Season pack: a season is named but no episode → whole-season release.
 			p.Season = atoi(m[1])
@@ -165,4 +168,46 @@ func cleanTitle(title string, kind provider.MediaKind) string {
 	name := title[:cut]
 	name = strings.NewReplacer(".", " ", "_", " ").Replace(name)
 	return strings.TrimSpace(name)
+}
+
+// episodeTitleFrom extracts an episode title from the part of a release name
+// that follows the S##E## marker, cutting at the first technical token
+// (resolution, source, codec, or a proper/repack/language marker). It is
+// deliberately conservative: it returns "" whenever the result is not clearly a
+// title, because a wrong episode title causes a false rejection (nothing
+// downloads) while a missing one merely costs a signal.
+func episodeTitleFrom(rest string) string {
+	cut := len(rest)
+	consider := func(m []int) {
+		if m != nil && m[0] < cut {
+			cut = m[0]
+		}
+	}
+	consider(reResolution.FindStringIndex(rest))
+	consider(reCodec.FindStringIndex(rest))
+	// Proper/repack/language are technical tokens, never episode-title words.
+	// Cutting at them stops junk token pairs ("REAL.PROPER", "FRENCH.DUBBED")
+	// from leaking past the alpha<2 guard as a false title, which T7's
+	// contradiction check would turn into a false rejection.
+	consider(reProper.FindStringIndex(rest))
+	consider(reRepack.FindStringIndex(rest))
+	consider(reLanguage.FindStringIndex(rest))
+	for _, sp := range sourcePatterns {
+		consider(sp.re.FindStringIndex(rest))
+	}
+	words := strings.FieldsFunc(rest[:cut], func(r rune) bool {
+		return r == '.' || r == '_' || r == '-' || r == ' '
+	})
+	// A single token is not a title: it is far more likely a technical token
+	// that leaked past the cuts above.
+	alpha := 0
+	for _, w := range words {
+		if len(w) >= 3 && strings.IndexFunc(w, unicode.IsLetter) >= 0 {
+			alpha++
+		}
+	}
+	if alpha < 2 {
+		return ""
+	}
+	return strings.Join(words, " ")
 }

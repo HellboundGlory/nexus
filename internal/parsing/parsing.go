@@ -42,6 +42,7 @@ type ParsedRelease struct {
 	Year         int        `json:"year"`
 	Season       int        `json:"season"`
 	Episodes     []int      `json:"episodes"`
+	EpisodeTitle string     `json:"episodeTitle"`
 	Edition      string     `json:"edition"`
 	Source       Source     `json:"source"`
 	Resolution   Resolution `json:"resolution"`
