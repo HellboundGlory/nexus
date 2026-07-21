@@ -227,11 +227,21 @@ carries no single episode title to compare against; its release name has no `S##
 marker, so `EpisodeTitle` is empty and the check would be an unconditional no-op. Stating
 it explicitly so its absence reads as deliberate rather than as a missed site.
 
-`rssPlaceTV` (`internal/automation/rss.go`) already resolves the series via `matchSeries`
-and needs neither check. It should, however, benefit from aliases: `matchSeries`'s
-`seriesByTitle` index is built from primary titles only, so an aliased release does not
-match there either. Extending that index to include aliases is **in scope** for this
-sub-project, since it is the same data and the same defect.
+`rssPlaceTV` (`internal/automation/rss.go`) resolves the series via `matchSeries`, so it
+needs the **alias** extension (see below) but was originally scoped to skip the
+episode-title contradiction check. **CORRECTION (2026-07-21, post-implementation
+whole-branch review):** that was wrong. Series-title resolution is exactly what cannot
+separate two shows sharing a scene name — the same reason the contradiction check exists
+on the search path — so `matchSeries` accepting a wrong-show release means RSS would grab
+it. A review empirically grabbed a Horizons-style `Pokemon.S01E01.The.Pendant...` release
+through `RSSSync`. The episode-title contradiction check is therefore applied at
+`rssPlaceTV`'s **per-episode** branch as well (keyed on the placed episode's stored title);
+the season-pack branch still takes no episode-title check (a pack has no single episode
+title), consistent with the search side. This makes RSS the FOURTH gated grab path, not an
+exception. It also benefits from aliases: `matchSeries`'s `seriesByTitle` index is built
+from primary titles only, so an aliased release does not match there either. Extending that
+index to include aliases is **in scope** for this sub-project, since it is the same data
+and the same defect.
 
 ## 6. Testing
 
