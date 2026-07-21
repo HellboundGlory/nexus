@@ -53,3 +53,17 @@ func TestReleaseIsForSeriesFallsBackWithoutAliases(t *testing.T) {
 		t.Fatal("fallback must still reject a different show")
 	}
 }
+
+// A series whose title is itself a bare year (e.g. "1923") must still match
+// its own releases. releaseIsForSeries must not strip a year token from the
+// release title before comparing, or the key collapses to "" and the series
+// becomes permanently unmatchable -- this also keeps the index (built from
+// the RAW, unstripped stored title) and the lookup key in sync for any
+// year-suffixed title.
+func TestReleaseIsForSeriesMatchesYearTitledSeries(t *testing.T) {
+	se := &store.Series{ID: 1, Title: "1923"}
+	ti := titleIndex{"1923": {1}}
+	if !releaseIsForSeries(se, parsedTV("1923.S01E01.1080p.WEB.h264-GRP"), ti) {
+		t.Fatal("a year-titled series must match its own release")
+	}
+}

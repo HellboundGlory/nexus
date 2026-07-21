@@ -75,17 +75,22 @@ func releaseIsForSeries(se *store.Series, p parsing.ParsedRelease, ti titleIndex
 	return ids[0] == se.ID
 }
 
-// cleanedReleaseTitle strips a trailing year and a bare season token
-// ("S01") from a release's parsed title, mirroring the normalization the
-// matcher this file replaces used to apply. It is load-bearing for season
-// packs, not cosmetic: parsing.Parse's cleanTitle only cuts a TV title at
-// the season+episode token (reSeasonEp), which requires an episode number.
-// A season-pack-only release (no episode) has no episode token, so its
-// parsed Title keeps the trailing "S01" -- e.g. "The Show S01" instead of
-// "The Show" -- and would otherwise never match the series' own primary
-// title or any alias.
+// cleanedReleaseTitle strips a bare season token ("S01") from a release's
+// parsed title. It is load-bearing for season packs, not cosmetic:
+// parsing.Parse's cleanTitle only cuts a TV title at the season+episode
+// token (reSeasonEp), which requires an episode number. A season-pack-only
+// release (no episode) has no episode token, so its parsed Title keeps the
+// trailing "S01" -- e.g. "The Show S01" instead of "The Show" -- and would
+// otherwise never match the series' own primary title or any alias.
+//
+// Deliberately does NOT also strip a year (reTitleYear), unlike the matcher
+// this file replaces: a series titled with a bare year ("1923") would
+// normalize to "" and become unmatchable against its own releases, and the
+// titleIndex is keyed on the RAW (unstripped) series/alias title, so
+// stripping the year here would desync the two sides for any year-suffixed
+// title ("The Show 2020"). The cost is a real but narrow divergence: a
+// release that happens to carry a year token the stored title lacks won't
+// match via this path -- a safe missed grab, not a wrong one.
 func cleanedReleaseTitle(title string) string {
-	cleaned := reTitleYear.ReplaceAllString(title, " ")
-	cleaned = reSeasonTok.ReplaceAllString(cleaned, " ")
-	return cleaned
+	return reSeasonTok.ReplaceAllString(title, " ")
 }
