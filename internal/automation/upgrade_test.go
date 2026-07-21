@@ -413,3 +413,25 @@ func TestUpgradeEpisodeRejectsReleaseFromADifferentShow(t *testing.T) {
 		t.Fatalf("an upgrade must not take a different show's release: n=%d reqs=%+v", n, fe.reqs)
 	}
 }
+
+func TestUpgradeEpisodeAcceptsAliasNamedRelease(t *testing.T) {
+	st := newStore(t)
+	ctx := context.Background()
+	sid, _ := seedUpgradableSeries(t, st, 1)
+	if err := st.ReplaceSeriesAliases(ctx, sid, []store.SeriesAlias{{Title: "The Show Alternate", Country: "US"}}); err != nil {
+		t.Fatal(err)
+	}
+	fs := &fakeSearcher{releases: []provider.Release{
+		{Title: "The.Show.Alternate.S01E01.1080p.BluRay.x264-GRP", DownloadURL: "alias", Protocol: provider.ProtocolUsenet},
+	}}
+	fe := &fakeEnqueuer{}
+	svc := NewService(st, fs, fe, nil)
+
+	n, err := svc.UpgradeSweep(ctx, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 || len(fe.reqs) != 1 {
+		t.Fatalf("an alias-named upgrade must be grabbed: n=%d reqs=%+v", n, fe.reqs)
+	}
+}

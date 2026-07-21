@@ -1077,3 +1077,53 @@ func TestSearchEpisodeMatchesAccentedSeriesTitleAgainstASCIIRelease(t *testing.T
 		t.Fatalf("accented series title must match its ASCII release: n=%d reqs=%+v", n, fe.reqs)
 	}
 }
+
+// seedAliasedSeries gives the series an alias so a release named for the alias
+// resolves to it, and a same-numbered release of another show does not.
+func seedAliasedSeries(t *testing.T, st *store.Store) (int64, []int64) {
+	t.Helper()
+	ctx := context.Background()
+	sid, epIDs := seedSeries(t, st, true, 3)
+	if err := st.ReplaceSeriesAliases(ctx, sid, []store.SeriesAlias{{Title: "The Show Alternate", Country: "US"}}); err != nil {
+		t.Fatal(err)
+	}
+	return sid, epIDs
+}
+
+func TestSearchEpisodeAcceptsAliasNamedRelease(t *testing.T) {
+	st := newStore(t)
+	ctx := context.Background()
+	_, epIDs := seedAliasedSeries(t, st)
+	fs := &fakeSearcher{releases: []provider.Release{
+		{Title: "The.Show.Alternate.S01E01.1080p.WEB-DL.x264-GRP", DownloadURL: "alias", Protocol: provider.ProtocolUsenet},
+	}}
+	fe := &fakeEnqueuer{}
+	svc := NewService(st, fs, fe, nil)
+
+	n, err := svc.SearchEpisode(ctx, epIDs[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 || len(fe.reqs) != 1 || fe.reqs[0].DownloadURL != "alias" {
+		t.Fatalf("an alias-named release must be grabbed: n=%d reqs=%+v", n, fe.reqs)
+	}
+}
+
+func TestSearchSeasonPackAcceptsAliasNamedRelease(t *testing.T) {
+	st := newStore(t)
+	ctx := context.Background()
+	sid, _ := seedAliasedSeries(t, st)
+	fs := &fakeSearcher{releases: []provider.Release{
+		{Title: "The.Show.Alternate.S01.1080p.BluRay.x264-GRP", DownloadURL: "aliaspack", Protocol: provider.ProtocolUsenet},
+	}}
+	fe := &fakeEnqueuer{}
+	svc := NewService(st, fs, fe, nil)
+
+	n, err := svc.SearchSeason(ctx, sid, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 || len(fe.reqs) != 1 || fe.reqs[0].DownloadURL != "aliaspack" {
+		t.Fatalf("an alias-named pack must be grabbed: n=%d reqs=%+v", n, fe.reqs)
+	}
+}
