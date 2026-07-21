@@ -152,6 +152,10 @@ func (s *Service) upgradeSweep(ctx context.Context, batch int) (int, error) {
 	if err != nil {
 		return total, err
 	}
+	ti, err := s.buildTitleIndex(ctx)
+	if err != nil {
+		return total, err
+	}
 	for _, se := range series {
 		if processed >= batch {
 			return total, nil
@@ -198,7 +202,7 @@ func (s *Service) upgradeSweep(ctx context.Context, batch int) (int, error) {
 				continue
 			}
 			processed++
-			grabbed, err := s.upgradeEpisode(ctx, &se, e, f, profile, cs)
+			grabbed, err := s.upgradeEpisode(ctx, &se, e, f, profile, cs, ti)
 			if err != nil {
 				slog.Warn("automation: upgrade episode search failed", "episodeId", e.ID, "err", err)
 				continue
@@ -238,7 +242,7 @@ func (s *Service) upgradeMovie(ctx context.Context, m store.Movie, f *store.Medi
 	return 0, nil
 }
 
-func (s *Service) upgradeEpisode(ctx context.Context, se *store.Series, e store.Episode, f *store.MediaFile, profile store.QualityProfile, cs cooldownSet) (int, error) {
+func (s *Service) upgradeEpisode(ctx context.Context, se *store.Series, e store.Episode, f *store.MediaFile, profile store.QualityProfile, cs cooldownSet, ti titleIndex) (int, error) {
 	ep := e.EpisodeNumber
 	releases, err := s.search.Search(ctx, tvQuery(se, e.SeasonNumber, &ep))
 	if err != nil {
@@ -248,7 +252,10 @@ func (s *Service) upgradeEpisode(ctx context.Context, se *store.Series, e store.
 	for _, c := range Decide(releases, provider.KindTV, profile) {
 		// Same loose-`q` hazard as the search path: an upgrade must not swap in
 		// a better-scoring episode of a different show (see releaseIsForSeries).
-		if !releaseIsForSeries(se, c.Parsed) {
+		if !releaseIsForSeries(se, c.Parsed, ti) {
+			continue
+		}
+		if episodeTitleContradicts(e.Title, c.Parsed) {
 			continue
 		}
 		if c.Parsed.Season == e.SeasonNumber && containsInt(c.Parsed.Episodes, e.EpisodeNumber) {

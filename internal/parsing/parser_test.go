@@ -74,6 +74,44 @@ func TestParseGroupAndLanguage(t *testing.T) {
 	}
 }
 
+func TestParseEpisodeTitle(t *testing.T) {
+	cases := []struct {
+		name  string
+		title string
+		want  string
+	}{
+		{
+			name:  "stops at resolution",
+			title: "Pokemon.S01E01.The.Pendant.That.Starts.It.All.Part.1.1080p.WEBRip.10bit.EAC3.2.0.x265-iVy",
+			want:  "The Pendant That Starts It All Part 1",
+		},
+		{"stops at source", "Pokemon.S01E01.DVDRip.x264-QCF", ""},
+		// PDTV must be a recognised source, else extraction cuts at the codec and
+		// yields "PDTV HebDub", contradicting the stored title and rejecting a
+		// possibly-correct release.
+		{"pdtv is a source, not an episode title", "Pokemon.S01E01.PDTV.HebDub.XviD-Sweet-Star", ""},
+		{"no episode title at all", "Pokmon.Indigo.League.s01e01", ""},
+		{"no season/episode marker", "Pokemon.Concierge.1080p.WEB-DL.x264-GRP", ""},
+		// Single-token candidates carry no signal: a stray technical token that
+		// leaks past the stop list must not become a false contradiction.
+		{"single token is not a signal", "The.Show.S01E01.Untokenized", ""},
+		{"no terminating token keeps the remainder", "The.Show.S01E01.A.Real Episode Name", "A Real Episode Name"},
+		// Junk token pairs must not become a false episode title (they would
+		// make T7 falsely reject a legitimate release).
+		{"real proper is not a title", "The.Show.S01E01.REAL.PROPER.1080p.WEB-DL.x264-GRP", ""},
+		{"internal repack is not a title", "The.Show.S01E01.iNTERNAL.REPACK.720p.HDTV.x264-GRP", ""},
+		{"language dub pair is not a title", "The.Show.S01E01.FRENCH.DUBBED.1080p.WEB-DL.x264-GRP", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := Parse(tc.title, provider.KindTV).EpisodeTitle
+			if got != tc.want {
+				t.Fatalf("EpisodeTitle = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func equalInts(a, b []int) bool {
 	if len(a) != len(b) {
 		return false

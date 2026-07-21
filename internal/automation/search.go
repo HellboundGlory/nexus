@@ -8,7 +8,6 @@ import (
 	"github.com/hellboundg/nexus/internal/core/provider"
 	"github.com/hellboundg/nexus/internal/core/store"
 	"github.com/hellboundg/nexus/internal/importing"
-	"github.com/hellboundg/nexus/internal/parsing"
 )
 
 // SearchMovie searches for a monitored, file-less movie and enqueues the best
@@ -184,6 +183,10 @@ func (s *Service) searchSeries(ctx context.Context, seriesID int64) (int, error)
 	if err != nil {
 		return 0, err
 	}
+	ti, err := s.buildTitleIndex(ctx)
+	if err != nil {
+		return 0, err
+	}
 	bud := newBudget(cfg.MaxConcurrentPerSeries, inFlight[seriesID])
 	total := 0
 	for _, sn := range seasons {
@@ -199,7 +202,7 @@ func (s *Service) searchSeries(ctx context.Context, seriesID int64) (int, error)
 		// while interactive search still found them. searchSeason filters on
 		// each episode's own Monitored flag, which is the source of truth here
 		// and matches what the RSS path already does.
-		n, err := s.searchSeason(ctx, se, sn.SeasonNumber, eps, profile, activeEps, bud)
+		n, err := s.searchSeason(ctx, se, sn.SeasonNumber, eps, profile, activeEps, bud, ti)
 		if err != nil {
 			return total, err
 		}
@@ -243,15 +246,19 @@ func (s *Service) searchSeasonEntry(ctx context.Context, seriesID int64, seasonN
 	if err != nil {
 		return 0, err
 	}
+	ti, err := s.buildTitleIndex(ctx)
+	if err != nil {
+		return 0, err
+	}
 	bud := newBudget(cfg.MaxConcurrentPerSeries, inFlight[seriesID])
-	return s.searchSeason(ctx, se, seasonNumber, eps, profile, activeEps, bud)
+	return s.searchSeason(ctx, se, seasonNumber, eps, profile, activeEps, bud, ti)
 }
 
 // searchSeason searches a single season. If every monitored episode in the
 // season is missing, it tries a full-season pack first (enqueued with all
 // missing episode ids); otherwise, or if no acceptable pack is found, it falls
 // back to per-episode searches. eps is the full episode list for the series.
-func (s *Service) searchSeason(ctx context.Context, se *store.Series, seasonNumber int, eps []store.Episode, profile store.QualityProfile, activeEps map[int64]struct{}, bud *budget) (int, error) {
+func (s *Service) searchSeason(ctx context.Context, se *store.Series, seasonNumber int, eps []store.Episode, profile store.QualityProfile, activeEps map[int64]struct{}, bud *budget, ti titleIndex) (int, error) {
 	var monitored, missing []store.Episode
 	seasonTotal := 0
 	for _, e := range eps {
@@ -289,7 +296,7 @@ func (s *Service) searchSeason(ctx context.Context, se *store.Series, seasonNumb
 		}
 		var packs []Candidate
 		for _, c := range Decide(releases, provider.KindTV, profile) {
-			if !releaseIsForSeries(se, c.Parsed) {
+			if !releaseIsForSeries(se, c.Parsed, ti) {
 				continue
 			}
 			if c.Parsed.Season == seasonNumber && len(c.Parsed.Episodes) == 0 {
@@ -318,7 +325,7 @@ func (s *Service) searchSeason(ctx context.Context, se *store.Series, seasonNumb
 		if !bud.allows() {
 			break
 		}
-		n, err := s.searchEpisode(ctx, se, e, profile, activeEps, bud)
+		n, err := s.searchEpisode(ctx, se, e, profile, activeEps, bud, ti)
 		if err != nil {
 			return total, err
 		}
@@ -359,13 +366,17 @@ func (s *Service) searchEpisodeEntry(ctx context.Context, episodeID int64) (int,
 	if err != nil {
 		return 0, err
 	}
+	ti, err := s.buildTitleIndex(ctx)
+	if err != nil {
+		return 0, err
+	}
 	bud := newBudget(cfg.MaxConcurrentPerSeries, inFlight[e.SeriesID])
-	return s.searchEpisode(ctx, se, *e, profile, activeEps, bud)
+	return s.searchEpisode(ctx, se, *e, profile, activeEps, bud, ti)
 }
 
 // searchEpisode searches one episode and enqueues the best covering release.
 // Skips if the episode already has a file or is already in flight in the queue.
-func (s *Service) searchEpisode(ctx context.Context, se *store.Series, e store.Episode, profile store.QualityProfile, activeEps map[int64]struct{}, bud *budget) (int, error) {
+func (s *Service) searchEpisode(ctx context.Context, se *store.Series, e store.Episode, profile store.QualityProfile, activeEps map[int64]struct{}, bud *budget, ti titleIndex) (int, error) {
 	f, err := s.store.MediaFileForEpisode(ctx, e.ID)
 	if err != nil {
 		return 0, err
@@ -386,7 +397,10 @@ func (s *Service) searchEpisode(ctx context.Context, se *store.Series, e store.E
 	}
 	var covering []Candidate
 	for _, c := range Decide(releases, provider.KindTV, profile) {
-		if !releaseIsForSeries(se, c.Parsed) {
+		if !releaseIsForSeries(se, c.Parsed, ti) {
+			continue
+		}
+		if episodeTitleContradicts(e.Title, c.Parsed) {
 			continue
 		}
 		if c.Parsed.Season == e.SeasonNumber && containsInt(c.Parsed.Episodes, e.EpisodeNumber) {
@@ -408,38 +422,6 @@ func (s *Service) searchEpisode(ctx context.Context, se *store.Series, e store.E
 		return 1, nil
 	}
 	return 0, nil
-}
-
-// releaseIsForSeries reports whether a parsed release actually belongs to se.
-//
-// Search results cannot be trusted to be on-target. Newznab matches its `q`
-// term loosely, and Nexus cannot scope a TV search server-side: it sends a
-// tmdbid, but newznab TV is keyed on tvdbid, which Nexus does not store. So a
-// search for "Pokemon" S01E01 returns S01E01 of every show whose name merely
-// starts with Pokemon -- "Pokemon Trainer Tour", "Pokemon Concierge" -- and
-// season/episode numbers cannot tell them apart. Without this check the best
-// SCORING release wins regardless of which show it belongs to.
-//
-// This is a client-side backstop, not the real fix: storing tvdbid and sending
-// it would let the indexer scope the query itself.
-//
-// Matching mirrors the RSS path's matchSeries so the two agree: exact match on
-// the normalized title, falling back to a year/season-token-stripped form.
-// Exact, not prefix -- a prefix test would re-accept "Pokemon Trainer Tour".
-// The cost is that a release named for an alternate scene title
-// ("Pokemon.Indigo.League...") is rejected; that is the same behaviour RSS has
-// always had, and a missed grab is recoverable where a wrong grab is not.
-func releaseIsForSeries(se *store.Series, p parsing.ParsedRelease) bool {
-	want := normTitle(se.Title)
-	if want == "" {
-		return false
-	}
-	if normTitle(p.Title) == want {
-		return true
-	}
-	cleaned := reTitleYear.ReplaceAllString(p.Title, " ")
-	cleaned = reSeasonTok.ReplaceAllString(cleaned, " ")
-	return normTitle(cleaned) == want
 }
 
 func tvQuery(se *store.Series, season int, episode *int) provider.Query {

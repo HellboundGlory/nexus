@@ -413,3 +413,57 @@ func TestUpgradeEpisodeRejectsReleaseFromADifferentShow(t *testing.T) {
 		t.Fatalf("an upgrade must not take a different show's release: n=%d reqs=%+v", n, fe.reqs)
 	}
 }
+
+// Pins the episode-title contradiction wiring in the UPGRADE path (the saga test
+// only pins searchEpisode). A wrong-show release that passes the title check and
+// is a genuine quality upgrade must still be rejected when its episode title
+// contradicts the stored one.
+func TestUpgradeEpisodeRejectsContradictingEpisodeTitle(t *testing.T) {
+	st := newStore(t)
+	ctx := context.Background()
+	sid, _ := seedUpgradableSeries(t, st, 1) // series "The Show", 1 ep with a WEBDL-1080p file (cutoff unmet)
+	// Give the stored episode a title so the contradiction check has a reference.
+	// ON CONFLICT DO UPDATE preserves the episode id (and thus its media file).
+	if err := st.UpsertEpisode(ctx, store.Episode{
+		SeriesID: sid, SeasonNumber: 1, EpisodeNumber: 1, Monitored: true, Title: "The Real Episode",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	fs := &fakeSearcher{releases: []provider.Release{
+		// Passes the title check ("The Show"), is a quality upgrade (Bluray-1080p
+		// over the stored WEBDL-1080p), but carries a contradicting episode title.
+		{Title: "The.Show.S01E01.Wrong.Episode.Name.1080p.BluRay.x264-GRP", DownloadURL: "wrong", Protocol: provider.ProtocolUsenet},
+	}}
+	fe := &fakeEnqueuer{}
+	svc := NewService(st, fs, fe, nil)
+
+	n, err := svc.UpgradeSweep(ctx, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 || len(fe.reqs) != 0 {
+		t.Fatalf("an upgrade whose episode title contradicts the stored one must be rejected: n=%d reqs=%+v", n, fe.reqs)
+	}
+}
+
+func TestUpgradeEpisodeAcceptsAliasNamedRelease(t *testing.T) {
+	st := newStore(t)
+	ctx := context.Background()
+	sid, _ := seedUpgradableSeries(t, st, 1)
+	if err := st.ReplaceSeriesAliases(ctx, sid, []store.SeriesAlias{{Title: "The Show Alternate", Country: "US"}}); err != nil {
+		t.Fatal(err)
+	}
+	fs := &fakeSearcher{releases: []provider.Release{
+		{Title: "The.Show.Alternate.S01E01.1080p.BluRay.x264-GRP", DownloadURL: "alias", Protocol: provider.ProtocolUsenet},
+	}}
+	fe := &fakeEnqueuer{}
+	svc := NewService(st, fs, fe, nil)
+
+	n, err := svc.UpgradeSweep(ctx, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 || len(fe.reqs) != 1 {
+		t.Fatalf("an alias-named upgrade must be grabbed: n=%d reqs=%+v", n, fe.reqs)
+	}
+}

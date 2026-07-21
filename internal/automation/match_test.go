@@ -1,0 +1,97 @@
+package automation
+
+import (
+	"testing"
+
+	"github.com/hellboundg/nexus/internal/core/provider"
+	"github.com/hellboundg/nexus/internal/core/store"
+	"github.com/hellboundg/nexus/internal/parsing"
+)
+
+func parsedTV(title string) parsing.ParsedRelease { return parsing.Parse(title, provider.KindTV) }
+
+func TestReleaseIsForSeries(t *testing.T) {
+	se := &store.Series{ID: 1, Title: "Pokémon"}
+	// Series 1 owns two aliases; series 2 is a different show in the library.
+	ti := titleIndex{
+		"pokemon":               {1},
+		"pokemon indigo league": {1},
+		"pocket monsters":       {1},
+		"pokemon horizons":      {2},
+		"shared name":           {1, 2},
+	}
+	cases := []struct {
+		name  string
+		title string
+		want  bool
+	}{
+		{"primary title", "Pokemon.S01E01.1080p.WEB-DL.x264-GRP", true},
+		{"accented primary vs ascii release", "Pokemon.S01E01.720p.HDTV.x264-GRP", true},
+		{"alias", "Pokemon.Indigo.League.s01e01", true},
+		{"different show", "Pokemon.Trainer.Tour.S01E01.1080p.WEB-DL.x264-GRP", false},
+		{"another library series", "Pokemon.Horizons.S01E01.1080p.WEB-DL.x264-GRP", false},
+		{"ambiguous across two series", "Shared.Name.S01E01.1080p.WEB-DL.x264-GRP", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := releaseIsForSeries(se, parsedTV(tc.title), ti); got != tc.want {
+				t.Fatalf("releaseIsForSeries(%q) = %v, want %v", tc.title, got, tc.want)
+			}
+		})
+	}
+}
+
+// A series whose aliases were never fetched must still match its own primary
+// title, rather than failing open (accept everything) or closed (accept nothing).
+func TestReleaseIsForSeriesFallsBackWithoutAliases(t *testing.T) {
+	se := &store.Series{ID: 1, Title: "Pokémon"}
+	empty := titleIndex{}
+	if !releaseIsForSeries(se, parsedTV("Pokemon.S01E01.1080p.WEB-DL.x264-GRP"), empty) {
+		t.Fatal("must fall back to primary-title matching when the index has no entry")
+	}
+	if releaseIsForSeries(se, parsedTV("Pokemon.Trainer.Tour.S01E01.1080p.WEB-DL.x264-GRP"), empty) {
+		t.Fatal("fallback must still reject a different show")
+	}
+}
+
+// A series whose title is itself a bare year (e.g. "1923") must still match
+// its own releases. releaseIsForSeries must not strip a year token from the
+// release title before comparing, or the key collapses to "" and the series
+// becomes permanently unmatchable -- this also keeps the index (built from
+// the RAW, unstripped stored title) and the lookup key in sync for any
+// year-suffixed title.
+func TestReleaseIsForSeriesMatchesYearTitledSeries(t *testing.T) {
+	se := &store.Series{ID: 1, Title: "1923"}
+	ti := titleIndex{"1923": {1}}
+	if !releaseIsForSeries(se, parsedTV("1923.S01E01.1080p.WEB.h264-GRP"), ti) {
+		t.Fatal("a year-titled series must match its own release")
+	}
+}
+
+func TestEpisodeTitleContradicts(t *testing.T) {
+	const stored = "Pokémon - I Choose You!"
+	cases := []struct {
+		name  string
+		title string
+		want  bool
+	}{
+		{"different show's episode title", "Pokemon.S01E01.The.Pendant.That.Starts.It.All.Part.1.1080p.WEBRip.x265-iVy", true},
+		{"matching episode title", "Pokemon.S01E01.I.Choose.You.1080p.WEB-DL.x264-GRP", false},
+		{"no episode title in the release", "Pokemon.S01E01.DVDRip.x264-QCF", false},
+		{"technical tokens only", "Pokemon.S01E01.PDTV.HebDub.XviD-Sweet-Star", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := episodeTitleContradicts(stored, parsedTV(tc.title)); got != tc.want {
+				t.Fatalf("episodeTitleContradicts(%q) = %v, want %v", tc.title, got, tc.want)
+			}
+		})
+	}
+}
+
+// With no stored episode title there is nothing to contradict.
+func TestEpisodeTitleContradictsNeedsBothSides(t *testing.T) {
+	if episodeTitleContradicts("", parsedTV("Pokemon.S01E01.The.Pendant.That.Starts.It.All.1080p.x265-iVy")) {
+		t.Fatal("an empty stored title must never contradict")
+	}
+}

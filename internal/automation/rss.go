@@ -93,7 +93,7 @@ type libraryIndex struct {
 	seriesByTitle map[string][]*store.Series
 }
 
-func buildLibraryIndex(movies []store.Movie, series []store.Series) *libraryIndex {
+func buildLibraryIndex(movies []store.Movie, series []store.Series, aliases []store.SeriesAlias) *libraryIndex {
 	idx := &libraryIndex{
 		movieByTMDB:   map[int]*store.Movie{},
 		movieByIMDb:   map[string]*store.Movie{},
@@ -125,6 +125,36 @@ func buildLibraryIndex(movies []store.Movie, series []store.Series) *libraryInde
 			idx.seriesByTMDB[se.TMDBID] = se
 		}
 		key := normTitle(se.Title)
+		idx.seriesByTitle[key] = append(idx.seriesByTitle[key], se)
+	}
+	byID := map[int64]*store.Series{}
+	for i := range series {
+		byID[series[i].ID] = &series[i]
+	}
+	for _, a := range aliases {
+		se, ok := byID[a.SeriesID]
+		if !ok {
+			continue // alias belongs to a series not in this index (e.g. no monitored episodes)
+		}
+		key := normTitle(a.Title)
+		if key == "" {
+			continue
+		}
+		// Dedup by series id: an alias can normalize to the series' own primary
+		// title (e.g. an alternate spelling) or two aliases can collide. Adding
+		// the same series twice under one key makes matchSeries see it as
+		// ambiguous against itself and refuse, silently breaking primary-title
+		// matching for that show. Mirrors buildTitleIndex's dedup in match.go.
+		already := false
+		for _, existing := range idx.seriesByTitle[key] {
+			if existing.ID == se.ID {
+				already = true
+				break
+			}
+		}
+		if already {
+			continue
+		}
 		idx.seriesByTitle[key] = append(idx.seriesByTitle[key], se)
 	}
 	return idx
@@ -263,6 +293,10 @@ func (s *Service) RSSSync(ctx context.Context) (RSSResult, error) {
 	if err != nil {
 		return res, err
 	}
+	aliases, err := s.store.AllSeriesAliases(ctx)
+	if err != nil {
+		return res, err
+	}
 	// Match releases only against series that still want something. The series'
 	// own monitored flag is NOT the test (see searchSeries) -- episode-level
 	// monitoring governs -- but a series with no monitored episodes is dropped
@@ -277,7 +311,7 @@ func (s *Service) RSSSync(ctx context.Context) (RSSResult, error) {
 			eligible = append(eligible, se)
 		}
 	}
-	idx := buildLibraryIndex(movies, eligible)
+	idx := buildLibraryIndex(movies, eligible, aliases)
 
 	// Bucket releases by resolved target.
 	movieRels := map[int64][]provider.Release{}
@@ -459,6 +493,9 @@ func (s *Service) rssPlaceTV(ctx context.Context, se *store.Series, eps []store.
 			var covering []Candidate
 			for _, c := range ranked {
 				if c.Parsed.Season == season && containsInt(c.Parsed.Episodes, e.EpisodeNumber) {
+					if episodeTitleContradicts(e.Title, c.Parsed) {
+						continue
+					}
 					covering = append(covering, c)
 				}
 			}

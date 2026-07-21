@@ -23,6 +23,7 @@ func testIndex() *libraryIndex {
 			{ID: 11, Title: "Clone", FirstAired: "1999-01-01", Monitored: true},
 			{ID: 12, Title: "Clone", FirstAired: "2015-01-01", Monitored: true},
 		},
+		nil,
 	)
 }
 
@@ -475,6 +476,55 @@ func TestRSSSyncPlacesMonitoredEpisodesOfUnmonitoredSeries(t *testing.T) {
 	}
 }
 
+func TestRSSSyncMatchesAliasNamedRelease(t *testing.T) {
+	st := newStore(t)
+	ctx := context.Background()
+	sid, _ := seedSeries(t, st, true, 3)
+	if err := st.ReplaceSeriesAliases(ctx, sid, []store.SeriesAlias{{Title: "The Show Alternate", Country: "US"}}); err != nil {
+		t.Fatal(err)
+	}
+	fs := &fakeSearcher{releases: []provider.Release{
+		{Title: "The.Show.Alternate.S01E01.1080p.WEB-DL.x264-GRP", DownloadURL: "alias", Protocol: provider.ProtocolUsenet},
+	}}
+	fe := &fakeEnqueuer{}
+	svc := NewService(st, fs, fe, nil)
+
+	res, err := svc.RSSSync(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Grabbed != 1 || len(fe.reqs) != 1 || fe.reqs[0].DownloadURL != "alias" {
+		t.Fatalf("RSS must resolve an alias-named release to its series: grabbed=%d reqs=%+v", res.Grabbed, fe.reqs)
+	}
+}
+
+// A TMDB alias can normalize to the series' OWN primary title ("Pokemon"
+// aliasing "Pokemon" with an accent). Indexing it a second time under the same
+// key would make matchSeries see two candidates and, with no year to
+// disambiguate, refuse -- silently breaking primary-title matching for that
+// show. The alias loop dedups by series id to prevent this.
+func TestRSSSyncAliasEqualToPrimaryTitleStillMatches(t *testing.T) {
+	st := newStore(t)
+	ctx := context.Background()
+	sid, _ := seedSeries(t, st, true, 3) // primary title "The Show", no first-aired year
+	if err := st.ReplaceSeriesAliases(ctx, sid, []store.SeriesAlias{{Title: "the show", Country: "US"}}); err != nil {
+		t.Fatal(err)
+	}
+	fs := &fakeSearcher{releases: []provider.Release{
+		{Title: "The.Show.S01E01.1080p.WEB-DL.x264-GRP", DownloadURL: "primary", Protocol: provider.ProtocolUsenet},
+	}}
+	fe := &fakeEnqueuer{}
+	svc := NewService(st, fs, fe, nil)
+
+	res, err := svc.RSSSync(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Grabbed != 1 || len(fe.reqs) != 1 {
+		t.Fatalf("a primary-title release must still match when an alias duplicates the primary title: grabbed=%d reqs=%+v", res.Grabbed, fe.reqs)
+	}
+}
+
 func TestRSSSyncSkipsSeriesWithNoMonitoredEpisodes(t *testing.T) {
 	st := newStore(t)
 	ctx := context.Background()
@@ -497,5 +547,40 @@ func TestRSSSyncSkipsSeriesWithNoMonitoredEpisodes(t *testing.T) {
 	}
 	if res.Grabbed != 0 || len(fe.reqs) != 0 {
 		t.Fatalf("a fully unmonitored series must be skipped: grabbed=%d reqs=%d", res.Grabbed, len(fe.reqs))
+	}
+}
+
+// The RSS path resolves a release to a series by title, which cannot separate two
+// shows sharing a scene name. A wrong-show release that resolves to the monitored
+// series but carries a contradicting episode title must be rejected here too, not
+// just on the search/upgrade paths.
+func TestRSSSyncRejectsContradictingEpisodeTitle(t *testing.T) {
+	st := newStore(t)
+	ctx := context.Background()
+	sid, _ := seedSeries(t, st, true, 1) // series "The Show", 1 monitored missing episode
+	// Give the stored episode a title so the contradiction check has a reference.
+	if err := st.UpsertEpisode(ctx, store.Episode{
+		SeriesID: sid, SeasonNumber: 1, EpisodeNumber: 1, Monitored: true, Title: "The Real Episode",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	fs := &fakeSearcher{releases: []provider.Release{
+		// Resolves to "The Show" by title AND is the higher quality, but its episode
+		// title contradicts the stored one -> must be rejected. Only the contradiction
+		// check can stop it (title resolution accepts it).
+		{Title: "The.Show.S01E01.Wrong.Episode.Name.1080p.BluRay.x264-GRP", DownloadURL: "wrong", Protocol: provider.ProtocolUsenet},
+		// Resolves to "The Show", no episode title to contradict, quality-eligible ->
+		// this is the one that should be grabbed once the wrong one is rejected.
+		{Title: "The.Show.S01E01.1080p.WEB-DL.x264-GRP", DownloadURL: "right", Protocol: provider.ProtocolUsenet},
+	}}
+	fe := &fakeEnqueuer{}
+	svc := NewService(st, fs, fe, nil)
+
+	res, err := svc.RSSSync(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Grabbed != 1 || len(fe.reqs) != 1 || fe.reqs[0].DownloadURL != "right" {
+		t.Fatalf("RSS must reject the contradicting release and grab the right one: grabbed=%d reqs=%+v", res.Grabbed, fe.reqs)
 	}
 }

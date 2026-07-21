@@ -28,7 +28,7 @@ func TestOpenAndMigrateIsIdempotent(t *testing.T) {
 	if err := db.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&applied); err != nil {
 		t.Fatal(err)
 	}
-	if applied != 8 {
-		t.Fatalf("expected 8 applied migrations, got %d", applied)
+	if applied != 9 {
+		t.Fatalf("expected 9 applied migrations, got %d", applied)
 	}
 }

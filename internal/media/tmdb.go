@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -152,6 +153,14 @@ type tmdbTVDetails struct {
 	} `json:"seasons"`
 }
 
+type tmdbAltTitles struct {
+	Results []struct {
+		Country string `json:"iso_3166_1"`
+		Title   string `json:"title"`
+		Type    string `json:"type"`
+	} `json:"results"`
+}
+
 type tmdbSeason struct {
 	SeasonNumber int `json:"season_number"`
 	Episodes     []struct {
@@ -172,6 +181,16 @@ func (c *TMDBClient) TVDetails(ctx context.Context, tmdbID int) (provider.Series
 	s := provider.SeriesMetadata{
 		TMDBID: d.ID, Title: d.Name, Overview: d.Overview, Status: d.Status,
 		FirstAired: d.FirstAir, PosterURL: imageURL(d.PosterPath), FanartURL: imageURL(d.BackdropPath),
+	}
+	// Aliases are best-effort: a failure here must not fail the series add or
+	// refresh that called us. The series simply has no aliases until next time.
+	var alt tmdbAltTitles
+	if err := c.get(ctx, "/tv/"+strconv.Itoa(tmdbID)+"/alternative_titles", nil, &alt); err != nil {
+		slog.Warn("tmdb: alternative titles lookup failed", "tmdbId", tmdbID, "err", err)
+	} else {
+		for _, a := range alt.Results {
+			s.Aliases = append(s.Aliases, provider.SeriesAlias{Title: a.Title, Country: a.Country, Type: a.Type})
+		}
 	}
 	for _, sn := range d.Seasons {
 		var sd tmdbSeason

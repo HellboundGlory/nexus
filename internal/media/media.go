@@ -179,6 +179,9 @@ func (s *Service) AddSeries(ctx context.Context, req AddSeriesRequest) (store.Se
 		}
 		return store.Series{}, err
 	}
+	if err := s.store.ReplaceSeriesAliases(ctx, id, toStoreAliases(id, md.Aliases)); err != nil {
+		slog.Warn("media: storing series aliases failed", "seriesId", id, "err", err)
+	}
 	for _, sn := range md.Seasons {
 		seasonMonitored := req.MonitorOption != MonitorNone
 		if err := s.store.UpsertSeason(ctx, store.Season{SeriesID: id, SeasonNumber: sn.SeasonNumber, Monitored: seasonMonitored}); err != nil {
@@ -260,6 +263,9 @@ func (s *Service) RefreshSeries(ctx context.Context, id int64) error {
 	cur.FanartURL = md.FanartURL
 	if err := s.store.UpdateSeries(ctx, *cur); err != nil {
 		return err
+	}
+	if err := s.store.ReplaceSeriesAliases(ctx, id, toStoreAliases(id, md.Aliases)); err != nil {
+		slog.Warn("media: refreshing series aliases failed", "seriesId", id, "err", err)
 	}
 	seasons, err := s.store.ListSeasons(ctx, id)
 	if err != nil {
@@ -569,4 +575,15 @@ func (s *Service) DeleteSeries(ctx context.Context, id int64, deleteFiles bool) 
 		s.removeItemFolders(*root, files)
 	}
 	return nil
+}
+
+// toStoreAliases maps provider aliases onto store rows. Alias persistence is
+// best-effort at both call sites: a failure is logged, never fatal, because a
+// series that exists without aliases still works via primary-title matching.
+func toStoreAliases(seriesID int64, in []provider.SeriesAlias) []store.SeriesAlias {
+	out := make([]store.SeriesAlias, 0, len(in))
+	for _, a := range in {
+		out = append(out, store.SeriesAlias{SeriesID: seriesID, Title: a.Title, Country: a.Country, Type: a.Type})
+	}
+	return out
 }
