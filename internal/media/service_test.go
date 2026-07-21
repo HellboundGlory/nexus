@@ -519,3 +519,57 @@ func TestDeleteSeriesWithDiskRemovesFolderAndRows(t *testing.T) {
 		t.Fatalf("series should be deleted, got %v", err)
 	}
 }
+
+func TestAddSeriesPersistsAliases(t *testing.T) {
+	fp := &fakeProvider{series: provider.SeriesMetadata{
+		TMDBID: 100, Title: "Pokémon",
+		Aliases: []provider.SeriesAlias{
+			{Title: "Pokémon: Indigo League", Country: "US", Type: "season 1"},
+			{Title: "Pocket Monsters", Country: "JP"},
+		},
+	}}
+	svc, st := newTestService(t, fp)
+	ctx := context.Background()
+	rf := mustRootFolder(t, st)
+	prof := mustQualityProfile(t, st)
+
+	se, err := svc.AddSeries(ctx, AddSeriesRequest{TMDBID: 100, RootFolderID: &rf, QualityProfileID: &prof, MonitorOption: MonitorAll})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.SeriesAliasesFor(ctx, se.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("want 2 aliases persisted on add, got %+v", got)
+	}
+}
+
+func TestRefreshSeriesReplacesAliases(t *testing.T) {
+	fp := &fakeProvider{series: provider.SeriesMetadata{
+		TMDBID: 100, Title: "Pokémon",
+		Aliases: []provider.SeriesAlias{{Title: "Old Alias", Country: "US"}},
+	}}
+	svc, st := newTestService(t, fp)
+	ctx := context.Background()
+	rf := mustRootFolder(t, st)
+	prof := mustQualityProfile(t, st)
+	se, err := svc.AddSeries(ctx, AddSeriesRequest{TMDBID: 100, RootFolderID: &rf, QualityProfileID: &prof, MonitorOption: MonitorAll})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Upstream drops the old alias and adds a new one.
+	fp.series.Aliases = []provider.SeriesAlias{{Title: "Pocket Monsters", Country: "JP"}}
+	if err := svc.RefreshSeries(ctx, se.ID); err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.SeriesAliasesFor(ctx, se.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Title != "Pocket Monsters" {
+		t.Fatalf("refresh must replace the alias set, got %+v", got)
+	}
+}
