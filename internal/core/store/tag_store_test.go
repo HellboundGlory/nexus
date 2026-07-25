@@ -143,9 +143,22 @@ func TestListTagsCountsAndDeleteInUse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// series and movies have INDEPENDENT rowid sequences, so the first movie
+	// would also be id 1 and collide with s1. Burn two movie ids first, so the
+	// tagged movie lands at 3 and no id is shared across the two junction
+	// tables. Without this the fixture cannot distinguish a series_tags /
+	// movie_tags mixup that keys on the raw entity id.
+	for i := 0; i < 2; i++ {
+		if _, err := st.CreateMovie(ctx, Movie{TMDBID: 90 + i, Title: "filler"}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	m1, err := st.CreateMovie(ctx, Movie{TMDBID: 21, Title: "M1"})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if m1 == s1 || m1 == s2 {
+		t.Fatalf("fixture is degenerate: movie id %d collides with a series id (%d, %d)", m1, s1, s2)
 	}
 	for _, id := range []int64{s1, s2} {
 		if _, err := st.db.ExecContext(ctx,
