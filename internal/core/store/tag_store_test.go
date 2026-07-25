@@ -134,7 +134,6 @@ func TestListTagsCountsAndDeleteInUse(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Two series and one movie, so the ids on the two sides differ.
 	s1, err := st.CreateSeries(ctx, Series{TMDBID: 11, Title: "S1"})
 	if err != nil {
 		t.Fatal(err)
@@ -207,5 +206,228 @@ func TestListTagsCountsAndDeleteInUse(t *testing.T) {
 	// The unused one still deletes.
 	if err := st.DeleteTag(ctx, unusedTag.ID); err != nil {
 		t.Fatalf("delete unused: %v", err)
+	}
+}
+
+func TestSetSeriesTagsReplacesTheSet(t *testing.T) {
+	st := newTagTestStore(t)
+	ctx := context.Background()
+
+	sid, err := st.CreateSeries(ctx, Series{TMDBID: 1, Title: "S"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []int64
+	for _, label := range []string{"a", "b", "c"} {
+		tg, err := st.CreateTag(ctx, label)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, tg.ID)
+	}
+
+	if err := st.SetSeriesTags(ctx, sid, []int64{ids[0], ids[1]}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.TagsForSeries(ctx, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0] != ids[0] || got[1] != ids[1] {
+		t.Fatalf("after first set: %v want %v", got, ids[:2])
+	}
+
+	// Replace, not merge: {a,b} then {b,c} must leave exactly {b,c}.
+	if err := st.SetSeriesTags(ctx, sid, []int64{ids[1], ids[2]}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = st.TagsForSeries(ctx, sid)
+	if len(got) != 2 || got[0] != ids[1] || got[1] != ids[2] {
+		t.Fatalf("after replace: %v want %v", got, ids[1:])
+	}
+
+	// Duplicates in the input are deduplicated, not an error.
+	if err := st.SetSeriesTags(ctx, sid, []int64{ids[0], ids[0]}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = st.TagsForSeries(ctx, sid)
+	if len(got) != 1 || got[0] != ids[0] {
+		t.Fatalf("after duplicate input: %v want [%d]", got, ids[0])
+	}
+
+	// nil clears.
+	if err := st.SetSeriesTags(ctx, sid, nil); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = st.TagsForSeries(ctx, sid)
+	if len(got) != 0 {
+		t.Fatalf("after nil: %v want empty", got)
+	}
+	if got == nil {
+		t.Fatal("TagsForSeries must return an empty slice, never nil")
+	}
+}
+
+func TestSetSeriesTagsRejectsUnknownTagAndRollsBack(t *testing.T) {
+	st := newTagTestStore(t)
+	ctx := context.Background()
+
+	sid, err := st.CreateSeries(ctx, Series{TMDBID: 1, Title: "S"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	good, err := st.CreateTag(ctx, "good")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetSeriesTags(ctx, sid, []int64{good.ID}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := st.SetSeriesTags(ctx, sid, []int64{good.ID, 999}); !errors.Is(err, ErrTagNotFound) {
+		t.Fatalf("expected ErrTagNotFound, got %v", err)
+	}
+	// The prior set must be intact — no partial write.
+	got, _ := st.TagsForSeries(ctx, sid)
+	if len(got) != 1 || got[0] != good.ID {
+		t.Fatalf("prior set not preserved after rollback: %v", got)
+	}
+}
+
+func TestSetTagsOnMissingEntity(t *testing.T) {
+	st := newTagTestStore(t)
+	ctx := context.Background()
+	tg, err := st.CreateTag(ctx, "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetSeriesTags(ctx, 999, []int64{tg.ID}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("series: expected ErrNotFound, got %v", err)
+	}
+	if err := st.SetMovieTags(ctx, 999, []int64{tg.ID}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("movie: expected ErrNotFound, got %v", err)
+	}
+}
+
+// Series and movies are tagged independently. DIFFERENT tag ids and DIFFERENT
+// media ids on the two sides, so a series_tags/movie_tags mixup cannot pass.
+func TestSeriesAndMovieTagsAreIndependent(t *testing.T) {
+	st := newTagTestStore(t)
+	ctx := context.Background()
+
+	// Three tags so the series and movie sides never share an id. Errors are
+	// checked: a silently failed create yields id 0 and turns every later
+	// assertion into a confusing ErrTagNotFound.
+	mustTag := func(label string) Tag {
+		t.Helper()
+		tg, err := st.CreateTag(ctx, label)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return tg
+	}
+	tagA, tagB, tagC := mustTag("a"), mustTag("b"), mustTag("c")
+
+	s1, err := st.CreateSeries(ctx, Series{TMDBID: 1, Title: "S1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s2, err := st.CreateSeries(ctx, Series{TMDBID: 2, Title: "S2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// series and movies have INDEPENDENT rowid sequences, so the first movie
+	// would also be id 1 and collide with s1. Burn two movie ids so the tagged
+	// movie lands at 3 and no id is shared across the two junction tables.
+	for i := 0; i < 2; i++ {
+		if _, err := st.CreateMovie(ctx, Movie{TMDBID: 90 + i, Title: "filler"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	m1, err := st.CreateMovie(ctx, Movie{TMDBID: 3, Title: "M1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m1 == s1 || m1 == s2 {
+		t.Fatalf("fixture is degenerate: movie id %d collides with a series id (%d, %d)", m1, s1, s2)
+	}
+
+	if err := st.SetSeriesTags(ctx, s1, []int64{tagA.ID, tagB.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetSeriesTags(ctx, s2, []int64{tagB.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetMovieTags(ctx, m1, []int64{tagC.ID}); err != nil {
+		t.Fatal(err)
+	}
+
+	if got, _ := st.TagsForMovie(ctx, m1); len(got) != 1 || got[0] != tagC.ID {
+		t.Fatalf("movie tags = %v want [%d]", got, tagC.ID)
+	}
+	if got, _ := st.TagsForSeries(ctx, s1); len(got) != 2 {
+		t.Fatalf("series 1 tags = %v want 2", got)
+	}
+
+	seriesMap, err := st.SeriesTagIDs(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(seriesMap) != 2 {
+		t.Fatalf("series map has %d entries, want 2: %v", len(seriesMap), seriesMap)
+	}
+	if len(seriesMap[s1]) != 2 || seriesMap[s1][0] != tagA.ID || seriesMap[s1][1] != tagB.ID {
+		t.Fatalf("series map[%d] = %v want [%d %d]", s1, seriesMap[s1], tagA.ID, tagB.ID)
+	}
+	if len(seriesMap[s2]) != 1 || seriesMap[s2][0] != tagB.ID {
+		t.Fatalf("series map[%d] = %v want [%d]", s2, seriesMap[s2], tagB.ID)
+	}
+
+	movieMap, err := st.MovieTagIDs(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(movieMap) != 1 || len(movieMap[m1]) != 1 || movieMap[m1][0] != tagC.ID {
+		t.Fatalf("movie map = %v want {%d: [%d]}", movieMap, m1, tagC.ID)
+	}
+}
+
+func TestBatchTagIDsEmptyLibrary(t *testing.T) {
+	st := newTagTestStore(t)
+	ctx := context.Background()
+	m, err := st.SeriesTagIDs(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m == nil || len(m) != 0 {
+		t.Fatalf("expected an empty non-nil map, got %v", m)
+	}
+}
+
+func TestDeletingSeriesCascadesItsTagRows(t *testing.T) {
+	st := newTagTestStore(t)
+	ctx := context.Background()
+
+	tg, err := st.CreateTag(ctx, "keepme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sid, err := st.CreateSeries(ctx, Series{TMDBID: 1, Title: "S"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetSeriesTags(ctx, sid, []int64{tg.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.DeleteSeries(ctx, sid); err != nil {
+		t.Fatal(err)
+	}
+	// The junction row is gone, so the tag is no longer in use and deletes.
+	list, _ := st.ListTags(ctx)
+	if len(list) != 1 || list[0].SeriesCount != 0 {
+		t.Fatalf("expected the association to cascade away, got %+v", list)
+	}
+	if err := st.DeleteTag(ctx, tg.ID); err != nil {
+		t.Fatalf("tag should be deletable after its series went away: %v", err)
 	}
 }

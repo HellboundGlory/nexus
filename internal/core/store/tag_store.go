@@ -141,3 +141,134 @@ func (s *Store) DeleteTag(ctx context.Context, id int64) error {
 	}
 	return nil
 }
+
+// entityExists reports whether a row with the given id exists in table, which
+// must be a literal from this file — never interpolate caller input.
+func (s *Store) entityExists(ctx context.Context, table string, id int64) (bool, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx,
+		fmt.Sprintf(`SELECT COUNT(*) FROM %s WHERE id = ?`, table), id).Scan(&n)
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
+// dedupeIDs preserves first-seen order.
+func dedupeIDs(ids []int64) []int64 {
+	seen := make(map[int64]bool, len(ids))
+	out := make([]int64, 0, len(ids))
+	for _, id := range ids {
+		if !seen[id] {
+			seen[id] = true
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// setTags replaces an entity's tag set inside one transaction. The tag ids are
+// checked explicitly rather than relying on the foreign-key violation, because
+// the driver's FK error is indistinguishable from any other error at the API
+// layer and could not be mapped to a 400 without matching on message text.
+func (s *Store) setTags(ctx context.Context, table, entityTable, idCol string, entityID int64, tagIDs []int64) error {
+	ok, err := s.entityExists(ctx, entityTable, entityID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return ErrNotFound
+	}
+	ids := dedupeIDs(tagIDs)
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	for _, tagID := range ids {
+		var n int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM tags WHERE id = ?`, tagID).Scan(&n); err != nil {
+			return err
+		}
+		if n == 0 {
+			return ErrTagNotFound
+		}
+	}
+	if _, err := tx.ExecContext(ctx,
+		fmt.Sprintf(`DELETE FROM %s WHERE %s = ?`, table, idCol), entityID); err != nil {
+		return err
+	}
+	for _, tagID := range ids {
+		if _, err := tx.ExecContext(ctx,
+			fmt.Sprintf(`INSERT INTO %s (%s, tag_id) VALUES (?, ?)`, table, idCol), entityID, tagID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (s *Store) tagsFor(ctx context.Context, table, idCol string, entityID int64) ([]int64, error) {
+	rows, err := s.db.QueryContext(ctx,
+		fmt.Sprintf(`SELECT tag_id FROM %s WHERE %s = ? ORDER BY tag_id`, table, idCol), entityID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) tagIDsByEntity(ctx context.Context, table, idCol string) (map[int64][]int64, error) {
+	rows, err := s.db.QueryContext(ctx,
+		fmt.Sprintf(`SELECT %s, tag_id FROM %s ORDER BY %s, tag_id`, idCol, table, idCol))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[int64][]int64{}
+	for rows.Next() {
+		var entityID, tagID int64
+		if err := rows.Scan(&entityID, &tagID); err != nil {
+			return nil, err
+		}
+		out[entityID] = append(out[entityID], tagID)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) TagsForSeries(ctx context.Context, seriesID int64) ([]int64, error) {
+	return s.tagsFor(ctx, "series_tags", "series_id", seriesID)
+}
+
+func (s *Store) SetSeriesTags(ctx context.Context, seriesID int64, tagIDs []int64) error {
+	return s.setTags(ctx, "series_tags", "series", "series_id", seriesID, tagIDs)
+}
+
+// SeriesTagIDs returns every series' tag ids in one query. Series with no tags
+// are omitted. SP-3 consumes this; SP-2 does not.
+func (s *Store) SeriesTagIDs(ctx context.Context) (map[int64][]int64, error) {
+	return s.tagIDsByEntity(ctx, "series_tags", "series_id")
+}
+
+func (s *Store) TagsForMovie(ctx context.Context, movieID int64) ([]int64, error) {
+	return s.tagsFor(ctx, "movie_tags", "movie_id", movieID)
+}
+
+func (s *Store) SetMovieTags(ctx context.Context, movieID int64, tagIDs []int64) error {
+	return s.setTags(ctx, "movie_tags", "movies", "movie_id", movieID, tagIDs)
+}
+
+// MovieTagIDs returns every movie's tag ids in one query. Movies with no tags
+// are omitted. SP-3 consumes this; SP-2 does not.
+func (s *Store) MovieTagIDs(ctx context.Context) (map[int64][]int64, error) {
+	return s.tagIDsByEntity(ctx, "movie_tags", "movie_id")
+}
