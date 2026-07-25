@@ -590,7 +590,7 @@ func TestSetSeriesTagsRejectsUnknownTagAndRollsBack(t *testing.T) {
 	if err := st.SetSeriesTags(ctx, sid, []int64{good.ID, 999}); !errors.Is(err, ErrTagNotFound) {
 		t.Fatalf("expected ErrTagNotFound, got %v", err)
 	}
-	// The prior set must be intact — no partial write.
+	// The prior set must be intact - no partial write.
 	got, _ := st.TagsForSeries(ctx, sid)
 	if len(got) != 1 || got[0] != good.ID {
 		t.Fatalf("prior set not preserved after rollback: %v", got)
@@ -747,7 +747,7 @@ Append to `internal/core/store/tag_store.go` (and make sure `database/sql` is im
 
 ```go
 // entityExists reports whether a row with the given id exists in table, which
-// must be a literal from this file — never interpolate caller input.
+// must be a literal from this file - never interpolate caller input.
 func (s *Store) entityExists(ctx context.Context, table string, id int64) (bool, error) {
 	var n int
 	err := s.db.QueryRowContext(ctx,
@@ -1350,7 +1350,7 @@ func TestSeriesAndMovieTagAssignment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// series ids are 1,2 and movie ids start again at 1 — the tagged series is
+	// series ids are 1,2 and movie ids start again at 1: the tagged series is
 	// 2 and the tagged movie is 1, so they differ. Asserted rather than assumed,
 	// because the two tables have independent rowid sequences.
 	if sid == mid {
