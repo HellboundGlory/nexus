@@ -249,8 +249,13 @@ field plus a batch join — and §3.2's batch reader already exists for it.
 ```
 
 Selected tags render as removable chips. A text input below filters `options`
-into a suggestion list. Enter selects the highlighted suggestion; if the trimmed
-input matches no existing label, Enter calls `onCreate` and adds the returned id.
+into a suggestion list, which is click-to-select.
+
+**Enter acts on the typed text, not on the suggestion list:** if the trimmed
+input case-insensitively equals an existing label, that tag is selected;
+otherwise `onCreate` is called and the returned id added. Enter deliberately
+does not pick the first suggestion — typing `an` with `anime` in the list would
+then silently select `anime` when the user meant to create `an`.
 
 Hand-rolled rather than a native `<datalist>`: datalist is barely styleable and
 effectively untestable in jsdom, and this repo tests its components. The UI kit
