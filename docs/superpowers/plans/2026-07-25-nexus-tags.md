@@ -477,7 +477,7 @@ Report any mutation that stays GREEN rather than adding an assertion to cover it
 
 ```bash
 git add internal/core/database/migrations/0010_tags.sql internal/core/store/tag_store.go internal/core/store/tag_store_test.go
-git commit -m "feat(store): tags table and tag CRUD"
+git commit -m "feat(store): tags table and tag CRUD" -m "Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -605,16 +605,33 @@ func TestSeriesAndMovieTagsAreIndependent(t *testing.T) {
 	st := newTagTestStore(t)
 	ctx := context.Background()
 
-	// Three tags so the series and movie sides never share an id.
-	tagA, _ := st.CreateTag(ctx, "a")
-	tagB, _ := st.CreateTag(ctx, "b")
-	tagC, _ := st.CreateTag(ctx, "c")
+	// Three tags so the series and movie sides never share an id. Errors are
+	// checked: a silently failed create yields id 0 and turns every later
+	// assertion into a confusing ErrTagNotFound.
+	mustTag := func(label string) Tag {
+		t.Helper()
+		tg, err := st.CreateTag(ctx, label)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return tg
+	}
+	tagA, tagB, tagC := mustTag("a"), mustTag("b"), mustTag("c")
 
 	// Two series first, so series ids are 1,2 and the movie id is 1 — the
 	// entity ids also differ between the two tables.
-	s1, _ := st.CreateSeries(ctx, Series{TMDBID: 1, Title: "S1"})
-	s2, _ := st.CreateSeries(ctx, Series{TMDBID: 2, Title: "S2"})
-	m1, _ := st.CreateMovie(ctx, Movie{TMDBID: 3, Title: "M1"})
+	s1, err := st.CreateSeries(ctx, Series{TMDBID: 1, Title: "S1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s2, err := st.CreateSeries(ctx, Series{TMDBID: 2, Title: "S2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m1, err := st.CreateMovie(ctx, Movie{TMDBID: 3, Title: "M1"})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if err := st.SetSeriesTags(ctx, s1, []int64{tagA.ID, tagB.ID}); err != nil {
 		t.Fatal(err)
@@ -672,8 +689,14 @@ func TestDeletingSeriesCascadesItsTagRows(t *testing.T) {
 	st := newTagTestStore(t)
 	ctx := context.Background()
 
-	tg, _ := st.CreateTag(ctx, "keepme")
-	sid, _ := st.CreateSeries(ctx, Series{TMDBID: 1, Title: "S"})
+	tg, err := st.CreateTag(ctx, "keepme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sid, err := st.CreateSeries(ctx, Series{TMDBID: 1, Title: "S"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := st.SetSeriesTags(ctx, sid, []int64{tg.ID}); err != nil {
 		t.Fatal(err)
 	}
@@ -853,7 +876,7 @@ Then `go build ./... && go vet ./...`.
 
 ```bash
 git add internal/core/store/tag_store.go internal/core/store/tag_store_test.go
-git commit -m "feat(store): series and movie tag associations"
+git commit -m "feat(store): series and movie tag associations" -m "Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -935,7 +958,8 @@ func TestTagAPICRUD(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("list: %d body=%s", rec.Code, rec.Body.String())
 	}
-	if got := rec.Body.String(); got != "[]\n" && got != "[]" {
+	// api.WriteJSON uses json.NewEncoder().Encode, which appends a newline.
+	if got := rec.Body.String(); got != "[]\n" {
 		t.Fatalf("empty list must serialise as [], got %q", got)
 	}
 
@@ -1156,7 +1180,10 @@ func (a *API) delete(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-**Ordering note in `writeTagError`:** the `errors.As` for `*TagInUseError` must come first. `TagInUseError` has an `Is` method matching `ErrTagInUse` only, so ordering is not strictly load-bearing here — but keeping the most specific match first is what makes it safe if a future error embeds another.
+**Two notes on `writeTagError`:**
+
+- The `errors.As` for `*TagInUseError` comes first. `TagInUseError`'s `Is` method matches `ErrTagInUse` only, so ordering is not strictly load-bearing today — mutation 2 below confirms that — but the most specific match belongs first so it stays safe if a future error embeds another.
+- The `fmt.Sprintf` here **deliberately duplicates** the wording in `TagInUseError.Error()`. Reusing `inUse.Error()` would leak the `store: ` prefix into an HTTP response body. The store error is for logs; this string is the user-facing one. Keep them separate.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
@@ -1179,17 +1206,42 @@ Add `"github.com/hellboundg/nexus/internal/tag"` to the imports. Then extend the
 
 - [ ] **Step 6: Add the mount test**
 
-Add to `cmd/nexus/main_test.go`, following the shape of the existing `TestRunMountsQualityRoutes` (read it first and mirror its setup exactly — port numbers must not collide with the ones already used in that file; pick an unused one):
+Add to `cmd/nexus/main_test.go`. This mirrors the existing `TestRunMountsQualityRoutes` (`main_test.go:144`) exactly. **Port 9595** — the file already uses 9596, 9597, 9598 and 9599, so this is the next free one. Authentication is by the `X-Api-Key` header, matching the sibling tests.
 
 ```go
 func TestRunMountsTagRoutes(t *testing.T) {
-	// Mirror TestRunMountsQualityRoutes exactly: same env setup, same server
-	// start/stop, then assert GET /api/v1/tag does NOT 404.
-	// A 401 is the expected unauthenticated response and proves the route exists.
+	t.Setenv("NEXUS_DATA_DIR", t.TempDir())
+	t.Setenv("NEXUS_PORT", "9595")
+	t.Setenv("NEXUS_API_KEY", "testkey")
+	t.Setenv("NEXUS_ADMIN_PASSWORD", "adminpw")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() { errCh <- run(ctx) }()
+	defer func() { cancel(); <-errCh }()
+
+	deadline := time.Now().Add(5 * time.Second)
+	var status int
+	for time.Now().Before(deadline) {
+		req, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:9595/api/v1/tag", nil)
+		req.Header.Set("X-Api-Key", "testkey")
+		resp, err := http.DefaultClient.Do(req)
+		if err == nil {
+			status = resp.StatusCode
+			resp.Body.Close()
+			if status == http.StatusOK {
+				break
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if status != http.StatusOK {
+		t.Fatalf("GET /api/v1/tag status = %d want 200", status)
+	}
 }
 ```
 
-Fill the body by copying `TestRunMountsQualityRoutes` and changing the path to `/api/v1/tag` and the port to a free one.
+No new imports — `context`, `net/http`, `testing` and `time` are already imported by this file.
 
 - [ ] **Step 7: Run the full Go suite**
 
@@ -1208,7 +1260,7 @@ Expected: all packages ok.
 
 ```bash
 git add internal/tag cmd/nexus/main.go cmd/nexus/main_test.go
-git commit -m "feat(tag): tag CRUD API"
+git commit -m "feat(tag): tag CRUD API" -m "Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -1225,12 +1277,34 @@ git commit -m "feat(tag): tag CRUD API"
 
 - [ ] **Step 1: Write the failing tests**
 
-Add to `internal/media/api_test.go`. **Read the file's existing helpers first** and reuse whatever router/store helper it already defines rather than adding a second one — if it has no reusable helper, mirror the one in `internal/tag/api_test.go`.
+Add to `internal/media/api_test.go`. **Harness facts, verified — do not re-derive:** the file's helper is `newTestAPI(t *testing.T, fp *fakeProvider) (http.Handler, *store.Store)` at `api_test.go:19`, and it mounts with a bare `a.Mount(r)`, **so request paths have NO `/api/v1` prefix** — they are `/series/{id}/tags`. There is no `do` helper in this package; requests are built with `httptest.NewRequest` + `strings.NewReader` directly. `context`, `encoding/json`, `net/http`, `net/http/httptest`, `strconv`, `strings`, `testing` and `store` are already imported.
 
 ```go
+// tagReq issues a request against the media router and returns the recorder.
+func tagReq(t *testing.T, r http.Handler, method, path, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	return w
+}
+
+func seriesTagPath(id int64) string { return "/series/" + strconv.FormatInt(id, 10) + "/tags" }
+func movieTagPath(id int64) string  { return "/movies/" + strconv.FormatInt(id, 10) + "/tags" }
+
+func decodeTagIDs(t *testing.T, w *httptest.ResponseRecorder) []int64 {
+	t.Helper()
+	var got struct {
+		TagIDs []int64 `json:"tagIds"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode %s: %v", w.Body.String(), err)
+	}
+	return got.TagIDs
+}
+
 func TestSeriesAndMovieTagAssignment(t *testing.T) {
-	// Uses whatever router+store helper this file already provides.
-	r, st := newMediaTestRouter(t) // <- replace with this file's actual helper
+	r, st := newTestAPI(t, &fakeProvider{})
 	ctx := context.Background()
 
 	tagA, err := st.CreateTag(ctx, "a")
@@ -1241,7 +1315,8 @@ func TestSeriesAndMovieTagAssignment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Two series so the series id and the movie id differ.
+	// Two series, so the series id (2) and the movie id (1) differ and a
+	// series/movie mixup cannot pass by coincidence.
 	if _, err := st.CreateSeries(ctx, store.Series{TMDBID: 1, Title: "S1"}); err != nil {
 		t.Fatal(err)
 	}
@@ -1254,48 +1329,29 @@ func TestSeriesAndMovieTagAssignment(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// PUT then GET on the series.
-	rec := do(t, r, http.MethodPut, fmt.Sprintf("/api/v1/series/%d/tags", sid),
-		map[string][]int64{"tagIds": {tagA.ID}})
-	if rec.Code != http.StatusOK {
-		t.Fatalf("put series tags: %d body=%s", rec.Code, rec.Body.String())
+	w := tagReq(t, r, http.MethodPut, seriesTagPath(sid), `{"tagIds":[`+strconv.FormatInt(tagA.ID, 10)+`]}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("put series tags: %d body=%s", w.Code, w.Body.String())
 	}
-	rec = do(t, r, http.MethodGet, fmt.Sprintf("/api/v1/series/%d/tags", sid), nil)
-	var got struct {
-		TagIDs []int64 `json:"tagIds"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
-		t.Fatal(err)
-	}
-	if len(got.TagIDs) != 1 || got.TagIDs[0] != tagA.ID {
-		t.Fatalf("series tags = %v want [%d]", got.TagIDs, tagA.ID)
+	if got := decodeTagIDs(t, tagReq(t, r, http.MethodGet, seriesTagPath(sid), "")); len(got) != 1 || got[0] != tagA.ID {
+		t.Fatalf("series tags = %v want [%d]", got, tagA.ID)
 	}
 
-	// The movie is independent: different id, different tag.
-	rec = do(t, r, http.MethodPut, fmt.Sprintf("/api/v1/movies/%d/tags", mid),
-		map[string][]int64{"tagIds": {tagB.ID}})
-	if rec.Code != http.StatusOK {
-		t.Fatalf("put movie tags: %d body=%s", rec.Code, rec.Body.String())
+	w = tagReq(t, r, http.MethodPut, movieTagPath(mid), `{"tagIds":[`+strconv.FormatInt(tagB.ID, 10)+`]}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("put movie tags: %d body=%s", w.Code, w.Body.String())
 	}
-	rec = do(t, r, http.MethodGet, fmt.Sprintf("/api/v1/movies/%d/tags", mid), nil)
-	got.TagIDs = nil
-	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
-		t.Fatal(err)
-	}
-	if len(got.TagIDs) != 1 || got.TagIDs[0] != tagB.ID {
-		t.Fatalf("movie tags = %v want [%d]", got.TagIDs, tagB.ID)
+	if got := decodeTagIDs(t, tagReq(t, r, http.MethodGet, movieTagPath(mid), "")); len(got) != 1 || got[0] != tagB.ID {
+		t.Fatalf("movie tags = %v want [%d]", got, tagB.ID)
 	}
 	// The series must be untouched by the movie write.
-	rec = do(t, r, http.MethodGet, fmt.Sprintf("/api/v1/series/%d/tags", sid), nil)
-	got.TagIDs = nil
-	_ = json.Unmarshal(rec.Body.Bytes(), &got)
-	if len(got.TagIDs) != 1 || got.TagIDs[0] != tagA.ID {
-		t.Fatalf("series tags changed after a movie write: %v", got.TagIDs)
+	if got := decodeTagIDs(t, tagReq(t, r, http.MethodGet, seriesTagPath(sid), "")); len(got) != 1 || got[0] != tagA.ID {
+		t.Fatalf("series tags changed after a movie write: %v", got)
 	}
 }
 
 func TestTagAssignmentErrors(t *testing.T) {
-	r, st := newMediaTestRouter(t) // <- replace with this file's actual helper
+	r, st := newTestAPI(t, &fakeProvider{})
 	ctx := context.Background()
 	sid, err := st.CreateSeries(ctx, store.Series{TMDBID: 1, Title: "S"})
 	if err != nil {
@@ -1303,34 +1359,48 @@ func TestTagAssignmentErrors(t *testing.T) {
 	}
 
 	// Unknown tag id -> 400, not a silent partial write.
-	rec := do(t, r, http.MethodPut, fmt.Sprintf("/api/v1/series/%d/tags", sid),
-		map[string][]int64{"tagIds": {999}})
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("unknown tag: %d body=%s", rec.Code, rec.Body.String())
+	if w := tagReq(t, r, http.MethodPut, seriesTagPath(sid), `{"tagIds":[999]}`); w.Code != http.StatusBadRequest {
+		t.Fatalf("unknown tag: %d body=%s", w.Code, w.Body.String())
 	}
 	// Unknown series -> 404.
-	rec = do(t, r, http.MethodPut, "/api/v1/series/999/tags", map[string][]int64{"tagIds": {}})
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("unknown series: %d", rec.Code)
+	if w := tagReq(t, r, http.MethodPut, "/series/999/tags", `{"tagIds":[]}`); w.Code != http.StatusNotFound {
+		t.Fatalf("unknown series: %d", w.Code)
+	}
+	// Malformed JSON -> 400.
+	if w := tagReq(t, r, http.MethodPut, seriesTagPath(sid), `{`); w.Code != http.StatusBadRequest {
+		t.Fatalf("bad json: %d", w.Code)
 	}
 	// Empty set is valid and clears.
-	rec = do(t, r, http.MethodPut, fmt.Sprintf("/api/v1/series/%d/tags", sid),
-		map[string][]int64{"tagIds": {}})
-	if rec.Code != http.StatusOK {
-		t.Fatalf("clear: %d body=%s", rec.Code, rec.Body.String())
+	if w := tagReq(t, r, http.MethodPut, seriesTagPath(sid), `{"tagIds":[]}`); w.Code != http.StatusOK {
+		t.Fatalf("clear: %d body=%s", w.Code, w.Body.String())
 	}
 	// GET on a tagless series returns [] not null.
-	rec = do(t, r, http.MethodGet, fmt.Sprintf("/api/v1/series/%d/tags", sid), nil)
-	if !bytes.Contains(rec.Body.Bytes(), []byte(`"tagIds":[]`)) {
-		t.Fatalf("expected an empty array, got %s", rec.Body.String())
+	if body := tagReq(t, r, http.MethodGet, seriesTagPath(sid), "").Body.String(); !strings.Contains(body, `"tagIds":[]`) {
+		t.Fatalf("expected an empty array, got %s", body)
+	}
+}
+
+// GET is deliberately lenient: reading the tags of a series that does not exist
+// returns 200 with an empty list rather than 404. TagsForSeries does no entity
+// lookup (only the write path does), and the detail page's own /series/{id}
+// request is what surfaces a missing series. Pinned so the leniency is a
+// decision rather than an accident.
+func TestGetTagsForMissingEntityIsLenient(t *testing.T) {
+	r, _ := newTestAPI(t, &fakeProvider{})
+	w := tagReq(t, r, http.MethodGet, "/series/999/tags", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d want 200", w.Code)
+	}
+	if got := decodeTagIDs(t, w); len(got) != 0 {
+		t.Fatalf("tags = %v want empty", got)
 	}
 }
 ```
 
 - [ ] **Step 2: Run to verify they fail**
 
-Run: `go test ./internal/media/ -run 'TagAssignment|TagAssignmentErrors' -v`
-Expected: FAIL — 404 from unregistered routes.
+Run: `go test ./internal/media/ -run 'TagAssignment|TagsForMissing' -v`
+Expected: FAIL — 404 from the unregistered routes.
 
 - [ ] **Step 3: Register the routes**
 
@@ -1447,7 +1517,7 @@ Then `go build ./... && go vet ./... && go test ./... -count=1`.
 
 ```bash
 git add internal/media/api.go internal/media/api_test.go
-git commit -m "feat(media): tag assignment endpoints for series and movies"
+git commit -m "feat(media): tag assignment endpoints for series and movies" -m "Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -1681,7 +1751,7 @@ Then: `cd web && npx tsc -p tsconfig.app.json --noEmit` — 0 errors.
 
 ```bash
 git add web/src/components/ui/tag-input.tsx web/src/components/ui/tag-input.test.tsx
-git commit -m "feat(web): TagInput component"
+git commit -m "feat(web): TagInput component" -m "Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -1755,75 +1825,75 @@ export function useDeleteTag() {
 
 - [ ] **Step 2: Write the failing section test**
 
-**Read `QualityProfilesSection.test.tsx` first** and mirror its mocking style exactly — this repo mocks the hook module, so match the existing pattern rather than inventing one.
+**Harness facts, verified — do not invent a different style.** `QualityProfilesSection.test.tsx` mocks the hook module with `vi.mock("./qualityApi", async (orig) => ({ ...actual, useX: vi.fn() }))` and drives it with `vi.mocked(...)`. It does **not** mock `@/lib/toast` — it wraps the component in the real `<ToastProvider>` and asserts the toast text with `screen.findByText`. Match that.
 
 Create `web/src/features/settings/TagsSection.test.tsx`:
 
 ```tsx
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, waitFor } from "@testing-library/react"
+import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { ToastProvider } from "@/lib/toast"
 import { ApiError } from "@/lib/api"
 import { TagsSection } from "./TagsSection"
+import * as api from "./tagApi"
 
-const toast = vi.fn()
-vi.mock("@/lib/toast", () => ({ useToast: () => ({ toast }) }))
-
-const del = { mutate: vi.fn() }
-const create = { mutate: vi.fn() }
-const rename = { mutate: vi.fn() }
-let tags: { data?: unknown; isLoading?: boolean; isError?: boolean } = { data: [] }
-
-vi.mock("./tagApi", () => ({
-  useTags: () => tags,
-  useCreateTag: () => create,
-  useRenameTag: () => rename,
-  useDeleteTag: () => del,
-}))
-
-beforeEach(() => {
-  vi.clearAllMocks()
-  tags = {
-    data: [
-      { id: 1, label: "anime", seriesCount: 3, movieCount: 0 },
-      { id: 2, label: "classics", seriesCount: 0, movieCount: 2 },
-    ],
+vi.mock("./tagApi", async (orig) => {
+  const actual = await orig<typeof import("./tagApi")>()
+  return {
+    ...actual,
+    useTags: vi.fn(), useCreateTag: vi.fn(), useRenameTag: vi.fn(), useDeleteTag: vi.fn(),
   }
 })
+beforeEach(() => vi.clearAllMocks())
+
+function mut(extra: object = {}) {
+  return { mutate: vi.fn(), isPending: false, ...extra } as unknown as never
+}
+
+const tags = [
+  { id: 1, label: "anime", seriesCount: 3, movieCount: 0 },
+  { id: 2, label: "classics", seriesCount: 0, movieCount: 2 },
+]
+
+function setup(rows: typeof tags, over: { del?: object; create?: object } = {}) {
+  vi.mocked(api.useTags).mockReturnValue({ data: rows, isLoading: false, isError: false } as never)
+  vi.mocked(api.useCreateTag).mockReturnValue(mut(over.create))
+  vi.mocked(api.useRenameTag).mockReturnValue(mut())
+  vi.mocked(api.useDeleteTag).mockReturnValue(mut(over.del))
+  render(<ToastProvider><TagsSection /></ToastProvider>)
+}
 
 describe("TagsSection", () => {
   it("shows each tag with its in-use counts", () => {
-    render(<TagsSection />)
+    setup(tags)
     expect(screen.getByText("anime")).toBeInTheDocument()
-    expect(screen.getByText(/3 series/)).toBeInTheDocument()
-    expect(screen.getByText(/2 movies/)).toBeInTheDocument()
+    expect(screen.getByText(/3 series, 0 movies/)).toBeInTheDocument()
+    expect(screen.getByText(/0 series, 2 movies/)).toBeInTheDocument()
   })
 
-  it("creates a tag", async () => {
-    render(<TagsSection />)
+  it("creates a tag from the inline input", async () => {
+    const create = vi.fn()
+    setup(tags, { create: { mutate: create } })
     await userEvent.type(screen.getByLabelText("New tag label"), "documentary")
     await userEvent.click(screen.getByRole("button", { name: "Add" }))
-    expect(create.mutate).toHaveBeenCalledWith("documentary", expect.anything())
+    expect(create).toHaveBeenCalledWith("documentary", expect.anything())
   })
 
-  it("surfaces a 409 delete as an error toast naming the counts", async () => {
-    del.mutate.mockImplementation((_id: number, opts: { onError: (e: Error) => void }) => {
-      opts.onError(new ApiError(409, "tag_in_use", "tag is in use by 3 series and 0 movies"))
-    })
-    render(<TagsSection />)
-    await userEvent.click(screen.getAllByRole("button", { name: "Delete" })[0])
-    await waitFor(() =>
-      expect(toast).toHaveBeenCalledWith(
-        "tag is in use by 3 series and 0 movies",
-        { variant: "error" },
-      ),
+  it("shows the server's in-use message verbatim on a 409 delete", async () => {
+    const del = vi.fn((_id, opts) =>
+      opts.onError(new ApiError(409, "tag_in_use", "tag is in use by 3 series and 0 movies")),
     )
+    setup(tags, { del: { mutate: del } })
+    await userEvent.click(screen.getAllByRole("button", { name: "Delete" })[0])
+    // Asserting the exact server text, not a client-side constant: this is what
+    // makes the refusal actionable.
+    expect(await screen.findByText("tag is in use by 3 series and 0 movies")).toBeInTheDocument()
   })
 
   it("shows an empty state when there are no tags", () => {
-    tags = { data: [] }
-    render(<TagsSection />)
-    expect(screen.getByText(/No tags/)).toBeInTheDocument()
+    setup([])
+    expect(screen.getByText(/No tags yet/)).toBeInTheDocument()
   })
 })
 ```
@@ -1844,7 +1914,9 @@ import { ApiError } from "@/lib/api"
 import { useTags, useCreateTag, useRenameTag, useDeleteTag } from "./tagApi"
 import type { Tag } from "./tagTypes"
 
-function useCount(tag: Tag): string {
+// Plain formatter, not a hook — it is called inside .map(), so a `use` prefix
+// would trip the rules-of-hooks lint rule.
+function countLabel(tag: Tag): string {
   return `${tag.seriesCount} series, ${tag.movieCount} ${tag.movieCount === 1 ? "movie" : "movies"}`
 }
 
@@ -1947,7 +2019,7 @@ export function TagsSection() {
                 ) : (
                   <div className="font-medium">{t.label}</div>
                 )}
-                <div className="text-xs text-[var(--color-muted)]">{useCount(t)}</div>
+                <div className="text-xs text-[var(--color-muted)]">{countLabel(t)}</div>
               </div>
               <button
                 onClick={() => setEditing({ id: t.id, label: t.label })}
@@ -1969,8 +2041,6 @@ export function TagsSection() {
   )
 }
 ```
-
-**Fix before running:** `useCount` is named like a hook but is a plain formatter called inside `.map()`, which violates the rules of hooks lint rule. Rename it to `countLabel(tag: Tag): string` and move it outside the component. Do this as part of writing the file — do not ship the `use` prefix.
 
 - [ ] **Step 5: Wire the tab and route**
 
@@ -2007,7 +2077,7 @@ Expected: PASS, 0 type errors. `SettingsLayout.test.tsx` may assert on the tab l
 
 ```bash
 git add web/src/features/settings/tagTypes.ts web/src/features/settings/tagApi.ts web/src/features/settings/TagsSection.tsx web/src/features/settings/TagsSection.test.tsx web/src/features/settings/SettingsLayout.tsx web/src/app/routes.tsx
-git commit -m "feat(web): Settings > Tags page"
+git commit -m "feat(web): Settings > Tags page" -m "Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -2057,22 +2127,94 @@ export function useSetMediaTags(kind: "series" | "movie", id: number) {
 
 - [ ] **Step 2: Write the failing detail test**
 
-Add to `web/src/features/library/SeriesDetail.test.tsx`, matching the file's existing mocking style (read it first):
+**Harness facts, verified.** Both detail test files use `vi.mock("@/features/library/api", async (orig) => ({ ...actual, <named hooks>: vi.fn() }))`, a local `mut()` helper, and render inside `QueryClientProvider` → `MemoryRouter` → `ToastProvider`. Because the mock **spreads `actual`**, any hook not named in that object runs for real — so `useMediaTags` and `useSetMediaTags` **must be added to the mock list** or the tests will attempt a real fetch. `SeriesDetail.test.tsx` inlines its render in each test; `MovieDetail.test.tsx` has a `renderMovie(id, movie, …)` helper at `:26`.
+
+**In `SeriesDetail.test.tsx`:** extend the existing `vi.mock` object at `:14-15` with `useMediaTags: vi.fn(), useSetMediaTags: vi.fn(),`, add the tagApi mock and the imports, then add the tests.
 
 ```tsx
-it("saves tag changes for the series", async () => {
-  // The existing suite already mocks ./api; extend that mock with
-  // useMediaTags: () => ({ data: [] }) and useSetMediaTags: () => setTags,
-  // and mock @/features/settings/tagApi with
-  // useTags: () => ({ data: [{ id: 1, label: "anime", seriesCount: 0, movieCount: 0 }] })
-  // and useCreateTag: () => ({ mutateAsync: vi.fn() }).
-  render(/* the suite's existing SeriesDetail render helper */)
+// --- add near the top, after the existing vi.mock("@/features/library/api", …) ---
+import * as tagApi from "@/features/settings/tagApi"
+
+vi.mock("@/features/settings/tagApi", async (orig) => {
+  const actual = await orig<typeof import("@/features/settings/tagApi")>()
+  return { ...actual, useTags: vi.fn(), useCreateTag: vi.fn() }
+})
+
+// --- and these two tests inside describe("SeriesDetail", …) ---
+function renderSeriesWithTags(setTags: ReturnType<typeof vi.fn>, createTag: ReturnType<typeof vi.fn>) {
+  vi.mocked(lib.useSeriesDetail).mockReturnValue({
+    data: {
+      id: 3, title: "The Bear", firstAired: "2022-06-23", overview: "", monitored: true,
+      qualityProfileId: 1, posterUrl: "", fanartUrl: "", episodeCount: 0, episodeFileCount: 0,
+      seasons: [], episodes: [],
+    },
+    isLoading: false, isError: false, refetch: vi.fn(),
+  } as unknown as ReturnType<typeof lib.useSeriesDetail>)
+  vi.mocked(lib.useQualityProfiles).mockReturnValue({ data: [] } as unknown as ReturnType<typeof lib.useQualityProfiles>)
+  vi.mocked(lib.useSetMonitored).mockReturnValue(mut())
+  vi.mocked(lib.useAssignProfile).mockReturnValue(mut())
+  vi.mocked(lib.useRefresh).mockReturnValue(mut())
+  vi.mocked(lib.useDelete).mockReturnValue(mut())
+  vi.mocked(lib.useSearch).mockReturnValue(mut())
+  vi.mocked(lib.useMediaTags).mockReturnValue({ data: [] } as unknown as ReturnType<typeof lib.useMediaTags>)
+  vi.mocked(lib.useSetMediaTags).mockReturnValue(mut({ mutate: setTags }))
+  vi.mocked(tagApi.useTags).mockReturnValue({
+    data: [{ id: 7, label: "anime", seriesCount: 0, movieCount: 0 }],
+    isLoading: false, isError: false,
+  } as never)
+  vi.mocked(tagApi.useCreateTag).mockReturnValue(mut({ mutateAsync: createTag }))
+
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  render(
+    <QueryClientProvider client={qc}>
+      <MemoryRouter>
+        <ToastProvider>
+          <SeriesDetail id={3} />
+        </ToastProvider>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  )
+}
+
+it("assigns an existing tag to the series", async () => {
+  const setTags = vi.fn()
+  renderSeriesWithTags(setTags, vi.fn())
   await userEvent.type(screen.getByLabelText("Tags"), "anime{Enter}")
-  await waitFor(() => expect(setTags.mutate).toHaveBeenCalledWith([1]))
+  await waitFor(() => expect(setTags).toHaveBeenCalledWith([7]))
+})
+
+// Pins the seam between TagInput's onCreate contract and useCreateTag: a novel
+// label must create the tag and then assign the id the server returned.
+it("creates a new tag from the series detail page and assigns it", async () => {
+  const setTags = vi.fn()
+  const createTag = vi.fn().mockResolvedValue({ id: 42, label: "documentary", seriesCount: 0, movieCount: 0 })
+  renderSeriesWithTags(setTags, createTag)
+  await userEvent.type(screen.getByLabelText("Tags"), "documentary{Enter}")
+  await waitFor(() => expect(createTag).toHaveBeenCalledWith("documentary"))
+  await waitFor(() => expect(setTags).toHaveBeenCalledWith([42]))
 })
 ```
 
-Add the mirrored test to `MovieDetail.test.tsx`, asserting the **movie** mutation is called — and use a **different tag id and a different media id** than the series test, so a `kind` mix-up cannot pass.
+`waitFor` must be added to the `@testing-library/react` import in this file.
+
+**In `MovieDetail.test.tsx`:** extend the `vi.mock` object at `:14-16` the same way, add the identical `tagApi` mock, extend the existing `renderMovie` helper with the four new `vi.mocked(...)` lines (accepting `setTags` and `createTag` as extra parameters defaulting to `vi.fn()`), and add:
+
+```tsx
+it("assigns an existing tag to the movie", async () => {
+  const setTags = vi.fn()
+  // DIFFERENT tag id (8) and DIFFERENT media id (5) than the series tests,
+  // so a series/movie kind mix-up in useSetMediaTags cannot pass.
+  vi.mocked(tagApi.useTags).mockReturnValue({
+    data: [{ id: 8, label: "classics", seriesCount: 0, movieCount: 0 }],
+    isLoading: false, isError: false,
+  } as never)
+  renderMovie(5, { id: 5, title: "Dune", year: 2021, overview: "x", monitored: true, hasFile: false, qualityProfileId: 1, posterUrl: "", fanartUrl: "" }, vi.fn(), vi.fn(), vi.fn(), setTags)
+  await userEvent.type(screen.getByLabelText("Tags"), "classics{Enter}")
+  await waitFor(() => expect(setTags).toHaveBeenCalledWith([8]))
+})
+```
+
+Note the `vi.mocked(tagApi.useTags)` call must come **before** `renderMovie` so the helper's own default does not overwrite it — or, simpler, give `renderMovie` a `tags` parameter. Either is fine; pick one and be consistent.
 
 - [ ] **Step 3: Run to verify it fails**
 
@@ -2127,12 +2269,13 @@ Expected: all suites pass, 0 type errors.
 1. In `MovieDetail.tsx`, change `useSetMediaTags("movie", id)` to `useSetMediaTags("series", id)` → the movie detail test fails. **This is why the two tests must use different ids — confirm red.**
 2. In `useMediaTags`, return the raw response instead of `.tagIds` → the detail tests fail.
 3. In `useSetMediaTags`, send `tagIds` as a bare array instead of `{ tagIds }` → the payload assertion fails.
+4. In both detail pages, change `onCreate` to `async (label) => (await createTag.mutateAsync(label)) as unknown as number` (returning the whole tag instead of `.id`) → "creates a new tag from the series detail page and assigns it" fails on the `[42]` assertion. **This is the Task 5 ↔ Task 6 seam; confirm red.**
 
 - [ ] **Step 8: Commit**
 
 ```bash
 git add web/src/features/library/api.ts web/src/features/library/SeriesDetail.tsx web/src/features/library/MovieDetail.tsx web/src/features/library/SeriesDetail.test.tsx web/src/features/library/MovieDetail.test.tsx
-git commit -m "feat(web): tag assignment on series and movie detail pages"
+git commit -m "feat(web): tag assignment on series and movie detail pages" -m "Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -2174,7 +2317,7 @@ Expected: no further changes beyond what the first build produced. If the two bu
 
 ```bash
 git add web/dist
-git commit -m "build(web): rebuild dist with the tags UI"
+git commit -m "build(web): rebuild dist with the tags UI" -m "Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ```
 
 - [ ] **Step 7: Report for whole-branch review**
@@ -2190,5 +2333,8 @@ Report: the commit range (`9de14af..HEAD`), the Go package count, the FE file/te
 **Known deviations from the spec, deliberate:**
 - The spec's `Tag` struct is reused verbatim as the API response type; there is no separate DTO. Consistent with `quality`, which serialises `store.QualityProfile` directly.
 - `internal/tag` has no `Service` layer. `quality` has one because it holds decision logic; tags have none.
+- **`GET /series/{id}/tags` on a missing series returns 200 with an empty list, not 404.** The spec's §4.2 table only specifies the 400 case. `TagsForSeries` does no entity lookup, and the detail page's own `/series/{id}` request is what surfaces a missing series. Pinned by `TestGetTagsForMissingEntityIsLenient` so it is a decision rather than an accident.
+
+**Harness facts verified against the real files before writing the snippets** (this repo has produced a fix wave every time a plan guessed): `newTestAPI(t, fp)` in `internal/media/api_test.go:19` mounts at the router root, so media test paths carry **no `/api/v1` prefix`**; `api.WriteJSON` uses `json.NewEncoder().Encode`, so an empty list is exactly `"[]\n"`; `cmd/nexus/main_test.go` already uses ports 9596-9599, so the tag test takes 9595 and authenticates with `X-Api-Key`; settings section tests wrap in the **real** `ToastProvider` and assert toast text with `findByText` rather than mocking `useToast`; both detail test files' `vi.mock` **spreads `actual`**, so `useMediaTags`/`useSetMediaTags` must be named in the mock object or the real hooks fire.
 
 **Type consistency:** `Tag` (Go) ↔ `Tag` (TS) both carry `id`/`label`/`seriesCount`/`movieCount`. `tagIds` is the JSON key on every assignment endpoint (T4) and in both hooks (T7). `TagOption` (T5) is structurally a subset of `Tag` and is mapped explicitly at the call site in T7, not aliased.
