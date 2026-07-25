@@ -17,6 +17,7 @@
 - **Nothing in SP-2 changes automation behaviour.** After this ships, tags exist and are read by no automation code. SP-3 is the first consumer. Do not wire tags into `internal/automation`.
 - **`store.Series` and `store.Movie` must NOT gain a `Tags` field.** Tags are read through the sibling endpoints in Task 4. Adding the field means every read path must populate it or silently returns `[]` — the defect class that produced SP-1's missed fourth grab path.
 - **Fixture rule:** any test covering both series and movies must use **different tag ids and different media ids** on the two sides. If both use id 1, a `series_tags`/`movie_tags` mixup passes by construction.
+  **The trap that already caught this plan once:** `series` and `movies` are separate tables with **independent rowid sequences**, so "create two series, then a movie" yields series 1, 2 and movie **1** — a collision, not the separation it looks like. Burn throwaway movie rows until the tagged movie's id is clear of every tagged series id, and assert the ids actually differ rather than trusting the seeding order.
 - **Frontend typecheck is `cd web && npx tsc -p tsconfig.app.json --noEmit`.** A bare `npx tsc --noEmit` in `web/` typechecks nothing and always exits 0.
 - **`gofmt -l` is useless in this repo** (line-ending noise lists nearly every file). Trust `go build ./...` and `go vet ./...`.
 - **Styling uses CSS custom properties only** — `var(--color-brand)`, `var(--color-border)`, `var(--color-panel)`, `var(--color-muted)`, `var(--color-warn)`, `var(--color-fg)`. No raw hex or `rgba()` literals.
@@ -233,7 +234,6 @@ func TestListTagsCountsAndDeleteInUse(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Two series and one movie, so the ids on the two sides differ.
 	s1, err := st.CreateSeries(ctx, Series{TMDBID: 11, Title: "S1"})
 	if err != nil {
 		t.Fatal(err)
@@ -242,9 +242,22 @@ func TestListTagsCountsAndDeleteInUse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// series and movies have INDEPENDENT rowid sequences, so the first movie
+	// would also be id 1 and collide with s1. Burn two movie ids first, so the
+	// tagged movie lands at 3 and no id is shared across the two junction
+	// tables. Without this the fixture cannot distinguish a series_tags /
+	// movie_tags mixup that keys on the raw entity id.
+	for i := 0; i < 2; i++ {
+		if _, err := st.CreateMovie(ctx, Movie{TMDBID: 90 + i, Title: "filler"}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	m1, err := st.CreateMovie(ctx, Movie{TMDBID: 21, Title: "M1"})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if m1 == s1 || m1 == s2 {
+		t.Fatalf("fixture is degenerate: movie id %d collides with a series id (%d, %d)", m1, s1, s2)
 	}
 	for _, id := range []int64{s1, s2} {
 		if _, err := st.db.ExecContext(ctx,
@@ -618,8 +631,6 @@ func TestSeriesAndMovieTagsAreIndependent(t *testing.T) {
 	}
 	tagA, tagB, tagC := mustTag("a"), mustTag("b"), mustTag("c")
 
-	// Two series first, so series ids are 1,2 and the movie id is 1 — the
-	// entity ids also differ between the two tables.
 	s1, err := st.CreateSeries(ctx, Series{TMDBID: 1, Title: "S1"})
 	if err != nil {
 		t.Fatal(err)
@@ -628,9 +639,20 @@ func TestSeriesAndMovieTagsAreIndependent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// series and movies have INDEPENDENT rowid sequences, so the first movie
+	// would also be id 1 and collide with s1. Burn two movie ids so the tagged
+	// movie lands at 3 and no id is shared across the two junction tables.
+	for i := 0; i < 2; i++ {
+		if _, err := st.CreateMovie(ctx, Movie{TMDBID: 90 + i, Title: "filler"}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	m1, err := st.CreateMovie(ctx, Movie{TMDBID: 3, Title: "M1"})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if m1 == s1 || m1 == s2 {
+		t.Fatalf("fixture is degenerate: movie id %d collides with a series id (%d, %d)", m1, s1, s2)
 	}
 
 	if err := st.SetSeriesTags(ctx, s1, []int64{tagA.ID, tagB.ID}); err != nil {
@@ -1327,6 +1349,12 @@ func TestSeriesAndMovieTagAssignment(t *testing.T) {
 	mid, err := st.CreateMovie(ctx, store.Movie{TMDBID: 3, Title: "M1"})
 	if err != nil {
 		t.Fatal(err)
+	}
+	// series ids are 1,2 and movie ids start again at 1 — the tagged series is
+	// 2 and the tagged movie is 1, so they differ. Asserted rather than assumed,
+	// because the two tables have independent rowid sequences.
+	if sid == mid {
+		t.Fatalf("fixture is degenerate: series id == movie id == %d", sid)
 	}
 
 	w := tagReq(t, r, http.MethodPut, seriesTagPath(sid), `{"tagIds":[`+strconv.FormatInt(tagA.ID, 10)+`]}`)
