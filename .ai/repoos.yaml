@@ -31,6 +31,8 @@ modules:
 tasks:
   build: { workflow: workflows/build.md }
   test: { workflow: workflows/test.md }
+  deploy: { workflow: workflows/deploy.md, confirm: required }
+  sdd: { workflow: workflows/sdd.md }
 
 # What every agent loads at the start of a session (§24).
 # Keep this small — listing everything defeats the purpose.
@@ -50,4 +52,4 @@ conventions:
 x-repoos-generate:
   targets:
     - file: CLAUDE.md
-      include: [entrypoint, policy, lessons, workflows]
+      include: [entrypoint, policy, conventions, lessons, workflows]

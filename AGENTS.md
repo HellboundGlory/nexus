@@ -15,8 +15,12 @@ one port.
 
 | If you need… | Read |
 |---|---|
-| How to build, test, or release | [`.ai/workflows/`](.ai/workflows/) |
-| How the system fits together | [`.ai/knowledge/`](.ai/knowledge/) |
+| How to build, test, or publish | [`.ai/workflows/`](.ai/workflows/) |
+| Repo layout, prod stack, *arr reference source | [`where-things-live`](.ai/knowledge/where-things-live.md) |
+| What's built next / current state / where to resume | [`roadmap`](.ai/knowledge/roadmap.md) |
+| How the system fits together | [`architecture`](.ai/knowledge/architecture.md) |
+| How release matching / grabbing decides | [`automation-release-matching`](.ai/knowledge/automation-release-matching.md) |
+| In-progress tags work | [`tags`](.ai/knowledge/tags.md) |
 | How we write and review code | [`.ai/conventions/`](.ai/conventions/) |
 | Why something is the way it is | [`.ai/decisions/`](.ai/decisions/) |
 | What agents may and may not do | [`.ai/meta/agent-policy.md`](.ai/meta/agent-policy.md) |
@@ -28,10 +32,18 @@ Machine-readable index: [`.ai/repoos.yaml`](.ai/repoos.yaml)
 
 ## Working in this repository
 
+- **Ask before pushing `master`.** It triggers the `docker-publish` workflow and
+  publishes the production image (`ghcr.io/hellboundglory/nexus:latest`). See
+  [`.ai/workflows/deploy.md`](.ai/workflows/deploy.md).
+- **Features are built through the SDD loop, Subagent-Driven** — never inline.
+  Follow [`.ai/workflows/sdd.md`](.ai/workflows/sdd.md) and
+  [`.ai/conventions/sdd-process.md`](.ai/conventions/sdd-process.md).
 - Run the `test` workflow (`make test web-test`) before opening a pull request.
 - `web/dist` is generated and committed — never edit it by hand. If a change
   touches the frontend, run `make web` and keep the bundle in sync (CI's
   `verify-web` checks this).
+- **Go comments stay ASCII** (non-ASCII breaks the build on this machine); never
+  strip accents from string literals that are real data.
 - Build straight from source with `make build`; there is no tagged release yet.
 - **Edit anything under `.ai/`? Regenerate in the same change** —
   `make repoos-generate`. The vendor instruction files are generated from
@@ -45,6 +57,8 @@ These have defined procedures. Follow them rather than improvising:
 |---|---|
 | Build | [`.ai/workflows/build.md`](.ai/workflows/build.md) |
 | Test | [`.ai/workflows/test.md`](.ai/workflows/test.md) |
+| Publish / deploy | [`.ai/workflows/deploy.md`](.ai/workflows/deploy.md) |
+| Feature (SDD) loop | [`.ai/workflows/sdd.md`](.ai/workflows/sdd.md) |
 
 ---
 

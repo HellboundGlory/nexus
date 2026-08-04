@@ -7,8 +7,10 @@ stability: evolving
 protected_paths:
   - "web/dist/**"
   - "AGENTS.md"
+  - "CLAUDE.md"
 # Machine-enforceable. Operation classes needing explicit confirmation:
 confirm_before:
+  - git-push-master           # pushes the prod image (docker-publish) — always ask
   - destructive-git-history   # rewrite/force-push of published history
   - release-signing           # creating a tagged release (no release process exists yet)
 summary: >
@@ -63,6 +65,34 @@ be told on their first day, so that agents get told them too.
 - After editing anything under `.ai/` or `AGENTS.md`, regenerate the vendor
   files with `make repoos-generate` in the same change, so the derived
   `CLAUDE.md` stays in sync.
+
+## The one that matters: pushing master
+
+**Stop before pushing `master` — every time.** Pushing `master` triggers the
+`docker-publish` GitHub Actions workflow, which publishes the
+`ghcr.io/hellboundglory/nexus:latest` production image. It is outward-facing and
+users pull it. A merge to `master` was authorized by the user is separate from
+permission to push that merge — ask each time (see
+[`deploy`](../workflows/deploy.md)). Pushing a **feature branch** is not
+publishing and needs no such pause.
+
+## Execution
+
+- **Features build via the SDD loop**, Subagent-Driven — do not implement a
+  plan inline and do not re-present the mode choice. Follow
+  [`sdd`](../workflows/sdd.md) and [`sdd-process`](../conventions/sdd-process.md).
+- Follow the load-bearing SDD rules: append a **controller addendum** to each
+  task brief, require **named mutations** to go red (a green one is a finding,
+  not a pass), have the **reviewer independently re-run** the mutations, and
+  make regression **fixtures visibly discriminate** the guarded outcome.
+
+## Source hygiene
+
+- **Go comments stay ASCII.** Non-ASCII (e.g. an em-dash) in a Go comment
+  becomes an encoding/build error on this machine and `go build`/`go vet` can't
+  catch it. Never "fix" a fixture by stripping accents from string *literals*
+  that are real stored data — see
+  [`ascii-comments-in-go-sources`](../memory/lessons/ascii-comments-in-go-sources.md).
 
 ## Communication
 
