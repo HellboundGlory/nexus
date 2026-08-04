@@ -21,7 +21,10 @@ Current **in-progress** sub-project (the one to resume). See
   implementers + reviewers, opus whole-branch review at the end).
 - **Tasks 1–2 done and reviewed clean** (store CRUD + tag associations).
 - **NEXT STEP, EXACTLY: dispatch Task 3** — the `internal/tag` CRUD API
-  package + `main.go` mount. BASE for its review package = `b5312ee`.
+  package + `main.go` mount. BASE for its review package = the current
+  `feat/tags` HEAD. The branch was rebased onto `master`, so earlier hashes
+  moved (task 2 now ends at `3d84fba`); do not use pre-rebase hashes like
+  `b5312ee`.
 - Plan: `docs/superpowers/plans/2026-07-25-nexus-tags.md` (8 TDD tasks);
   spec: `docs/superpowers/specs/2026-07-25-nexus-tags-design.md`.
 - The ledger (`.superpowers/sdd/2026-07-25-nexus-tags/progress.md`) tracks
