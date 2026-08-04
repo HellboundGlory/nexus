@@ -1,4 +1,4 @@
-.PHONY: build test lint run web web-dev web-test verify-web
+.PHONY: build test lint run web web-dev web-test verify-web repoos-generate repoos-check
 build: web
 	CGO_ENABLED=0 go build -o nexus ./cmd/nexus
 test:
@@ -17,3 +17,7 @@ web-test:
 
 verify-web: web
 	git diff --exit-code web/dist || (echo "web/dist is stale — run 'make web' and commit"; exit 1)
+
+REPOOS := npx repoos@1.5.0
+repoos-generate: ; $(REPOOS) generate .
+repoos-check:    ; $(REPOOS) validate . && $(REPOOS) generate . --check

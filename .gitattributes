@@ -3,3 +3,10 @@
 # committed bytes identical to a fresh build on every platform, so the
 # `verify-web` drift guard (git diff --exit-code web/dist) stays reliable.
 web/dist/** -text
+
+# RepoOS — append-only files that must not conflict across branches.
+# Agents append to the memory inbox on whatever branch they're on; without
+# merge=union, every parallel session produces a merge conflict in a file
+# whose contents are order-independent anyway.
+.ai/memory/inbox/**   merge=union
+.ai/meta/usage.jsonl  merge=union

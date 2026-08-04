@@ -1,0 +1,8 @@
+# RepoOS privileged paths — changes here affect what agents DO, not just what
+# they know. Give these the same review posture as CI configuration.
+# See .ai/meta/owners.yaml and the RepoOS SPECIFICATION.md §29.2.
+
+/AGENTS.md                  @HellboundGlory
+/.ai/repoos.yaml            @HellboundGlory
+/.ai/workflows/             @HellboundGlory
+/.ai/meta/agent-policy.md   @HellboundGlory

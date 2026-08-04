@@ -1,0 +1,53 @@
+# RepoOS manifest — https://github.com/HellboundGlory/repository-operating-system
+# Spec: 1.2.0   Reference: SPECIFICATION.md §9
+
+repoos:
+  spec_version: "1.2.0"
+  profile: core # core | standard | full  (§27)
+
+project:
+  name: nexus # REQUIRED — short identifier
+  description: A single binary that replaces Prowlarr + Sonarr + Radarr — unified indexer, download-client, and media-management engine with an embedded React web UI.
+  languages: [go, javascript, typescript]
+  repository: https://github.com/HellboundGlory/nexus
+
+entrypoint: AGENTS.md # REQUIRED — must be exactly this
+
+# Which modules are active. Delete any you don't use.
+modules:
+  knowledge: { enabled: true }
+  conventions: { enabled: true }
+  workflows: { enabled: true }
+  decisions: { enabled: true }
+  context: { enabled: false }
+  # Enabled by default: memory/inbox/ is the agent write path, and the learning
+  # loop in AGENTS.md is unreachable without it. Disable it only if you have
+  # decided you do not want agents recording anything.
+  memory: { enabled: true }
+  meta: { enabled: true }
+
+# Task routing (§15). Maps a task name to a workflow FILE.
+# Pointer map only — trigger phrases live in the workflow, never here.
+tasks:
+  build: { workflow: workflows/build.md }
+  test: { workflow: workflows/test.md }
+
+# What every agent loads at the start of a session (§24).
+# Keep this small — listing everything defeats the purpose.
+context:
+  always:
+    - AGENTS.md
+    - .ai/meta/agent-policy.md
+    - .ai/conventions/**
+  budget_hint: 8000
+
+conventions:
+  frontmatter_required: true
+
+# Vendor instruction files to project into, and which sections each includes.
+# `conventions` is omitted until it's actually filled in — a placeholder-laden
+# CLAUDE.md is worse than none. Add it back (and regenerate) once written.
+x-repoos-generate:
+  targets:
+    - file: CLAUDE.md
+      include: [entrypoint, policy, lessons, workflows]

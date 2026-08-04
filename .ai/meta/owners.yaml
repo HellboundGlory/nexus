@@ -1,0 +1,32 @@
+# Who is accountable for keeping parts of the RepoOS layer current.
+#
+# This is documentation, not access control — your VCS platform's CODEOWNERS
+# file does enforcement. This exists so a reader (human or agent) knows who to
+# ask when a document looks wrong.
+#
+# Use team names or public handles. Never email addresses, phone numbers, or
+# anything else you wouldn't want permanently in Git history.
+
+owners:
+  # Fallback for anything not matched below.
+  default: HellboundGlory
+
+  # Per-module ownership. Delete what you don't need.
+  modules:
+    knowledge: HellboundGlory
+    conventions: HellboundGlory
+    workflows: HellboundGlory
+    decisions: HellboundGlory
+
+  # Optional: per-path ownership for finer granularity.
+  # paths:
+  #   ".ai/knowledge/security-*.md": HellboundGlory
+
+# Privileged paths — changes here affect what agents DO, not just what they
+# know. Give these the same review posture as your CI configuration.
+# See SPECIFICATION.md §29.2 and INSTALL.md for the CODEOWNERS snippet.
+privileged:
+  - AGENTS.md
+  - .ai/repoos.yaml
+  - .ai/workflows/**
+  - .ai/meta/agent-policy.md
