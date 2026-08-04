@@ -86,3 +86,68 @@ jobs:
             VERSION=${{ steps.version.outputs.value }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # Every new image build gets a GitHub Release with an auto-generated
+  # changelog. Runs only on a build-relevant push to master (a docs-only push
+  # skips the whole workflow via the paths-ignore above, so it also skips
+  # this). The release's git tag is the BARE short SHA (not "v<sha>") so that
+  # creating the tag does NOT re-trigger this workflow's `tags: ["v*"]` branch
+  # -- otherwise every code push would build the image twice. It is displayed
+  # and titled as `v<shortsha>`.
+  release:
+    needs: build-and-push
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Compute short-SHA tag
+        id: tag
+        run: echo "tag=${GITHUB_SHA:0:12}" >> "$GITHUB_OUTPUT"
+
+      - name: Skip if this SHA already has a release
+        id: exists
+        run: |
+          if gh release view "${{ steps.tag.outputs.tag }}" --json tagName >/dev/null 2>&1; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Generate changelog
+        if: steps.exists.outputs.skip == 'false'
+        run: |
+          prev=""
+          if last=$(gh release list --limit 1 --json tagName --jq '.[0].tagName // empty' 2>/dev/null); then
+            prev="$last"
+          fi
+          if [ -n "$prev" ] && git cat-file -e "$prev^{commit}" >/dev/null 2>&1; then
+            range="$prev..${GITHUB_SHA}"
+            link="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/compare/${prev}...${GITHUB_SHA}"
+          else
+            # First release for the repo: use this push's own commit range.
+            range="${GITHUB_EVENT_BEFORE}..${GITHUB_SHA}"
+            link=""
+          fi
+          bash .github/scripts/changelog.sh "$range" > CHANGELOG.md
+          if [ -n "$link" ]; then
+            printf '\n**Full Changelog**: %s\n' "$link" >> CHANGELOG.md
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Create GitHub Release
+        if: steps.exists.outputs.skip == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: v${{ steps.tag.outputs.tag }}
+          body_path: CHANGELOG.md
+          target_commitish: ${{ github.sha }}
+
