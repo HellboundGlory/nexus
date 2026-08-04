@@ -19,24 +19,30 @@ Current **in-progress** sub-project (the one to resume). See
 
 - Branch `feat/tags` off master; execution is Subagent-Driven (sonnet
   implementers + reviewers, opus whole-branch review at the end).
-- **Tasks 1–6 done and reviewed clean** (store CRUD + associations + tag CRUD
-  API + media tag-assignment endpoints + `TagInput` component + Settings →
-  Tags page).
-- **NEXT STEP, EXACTLY: dispatch Task 7** — Tags on the Series and Movie detail
-  pages (uses `TagInput`). BASE for its review package = `9b20232` (Task 6's
-  commit). The branch was rebased onto `master` 034002b, so pre-rebase hashes
-  (e.g. `b5312ee`) are stale — task tips: T2 `3d84fba`, T3 `1124ea6`,
-  T4 `667236f`, T5 `9bb93de`, T6 `9b20232`.
-- **Task 6 done (2026-08-04):** Settings → Tags page (`tagTypes`/`tagApi`/
-  `TagsSection` + test, TABS entry, routes.tsx route). spec ✅ byte-compliant,
-  quality Approved. All 3 named mutations independently re-run by the reviewer
-  (all RED). The implementer added a **route-pin test** to `SettingsLayout.test.tsx`
-  (`createMemoryRouter(router.routes, ...)`) so removing the `routes.tsx` route
-  genuinely fails (the pre-existing TABS-href test couldn't catch it) — valid
-  and approved by review. Commit `9b20232`. **Deferred minor (whole-branch
-  triage):** `TagsSection.test.tsx` doesn't cover the loading/error branches of
-  `TagsSection.tsx` (plan-originated gap; the repo testing policy wants both).
-  Source-only task: `web/dist` deliberately not rebuilt until Task 8.
+- **Tasks 1–7 done and reviewed clean** (store CRUD + associations + tag CRUD
+  API + media tag-assignment endpoints + `TagInput` + Settings → Tags page +
+  detail-page assignment).
+- **NEXT STEP, EXACTLY: dispatch Task 8** — rebuild `web/dist` and verify the
+  whole branch (the final, build-only task). BASE = `8596535` (current HEAD).
+  The branch was rebased onto `master` 034002b — task tips: T2 `3d84fba`,
+  T3 `1124ea6`, T4 `667236f`, T5 `9bb93de`, T6 `9b20232`,
+  T7 `3f2ead8` (+ fix `8596535`), T8 `<pending>`.
+- **Task 6 done (2026-08-04):** Settings → Tags page — spec ✅, quality
+  Approved, all 3 mutations RED, added a route-pin test to
+  `SettingsLayout.test.tsx` (so removing the `routes.tsx` route genuinely
+  fails). Commit `9b20232`. Deferred minor (whole-branch): `TagsSection.test.tsx`
+  loading/error branches untested (plan-originated).
+- **Task 7 done (2026-08-04):** tag assignment on the Series/Movie detail pages
+  (`useMediaTags`/`useSetMediaTags` + `TagInput` row) — spec ✅ byte-compliant.
+  The addendum required **real-hooks tests in `library/api.test.tsx`** (mock
+  `@/lib/api`, `renderHook`) because the plan's mutations 1–3 target real hooks
+  the detail tests fully mock. Those pin `.tagIds` extraction, `{tagIds}` payload,
+  and the hook's kind→path routing (all RED). Commit `3f2ead8` + fix `8596535`:
+  an **Important** review finding (caller-side kind literal in
+  Series/MovieDetail unpinned — a cross-kind copy-paste bug would ship with all
+  tests green) was closed by asserting the mocked hooks' kind arg in the detail
+  tests, mutation-verified RED. Suite **57 files / 287 tests**, typecheck 0
+  errors. Source-only: `web/dist` not rebuilt until Task 8.
 - Plan: `docs/superpowers/plans/2026-07-25-nexus-tags.md` (8 TDD tasks);
   spec: `docs/superpowers/specs/2026-07-25-nexus-tags-design.md`.
 - The ledger (`.superpowers/sdd/2026-07-25-nexus-tags/progress.md`) tracks
