@@ -287,7 +287,7 @@ func TestSetSeriesTagsRejectsUnknownTagAndRollsBack(t *testing.T) {
 	if err := st.SetSeriesTags(ctx, sid, []int64{good.ID, 999}); !errors.Is(err, ErrTagNotFound) {
 		t.Fatalf("expected ErrTagNotFound, got %v", err)
 	}
-	// The prior set must be intact — no partial write.
+	// The prior set must be intact - no partial write.
 	got, _ := st.TagsForSeries(ctx, sid)
 	if len(got) != 1 || got[0] != good.ID {
 		t.Fatalf("prior set not preserved after rollback: %v", got)

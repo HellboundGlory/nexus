@@ -143,7 +143,7 @@ func (s *Store) DeleteTag(ctx context.Context, id int64) error {
 }
 
 // entityExists reports whether a row with the given id exists in table, which
-// must be a literal from this file — never interpolate caller input.
+// must be a literal from this file - never interpolate caller input.
 func (s *Store) entityExists(ctx context.Context, table string, id int64) (bool, error) {
 	var n int
 	err := s.db.QueryRowContext(ctx,

@@ -60,4 +60,22 @@ describe("TagsSection", () => {
     setup([])
     expect(screen.getByText(/No tags yet/)).toBeInTheDocument()
   })
+
+  it("shows a loading state while tags are still loading", () => {
+    vi.mocked(api.useTags).mockReturnValue({ data: undefined, isLoading: true, isError: false } as never)
+    vi.mocked(api.useCreateTag).mockReturnValue(mut())
+    vi.mocked(api.useRenameTag).mockReturnValue(mut())
+    vi.mocked(api.useDeleteTag).mockReturnValue(mut())
+    render(<ToastProvider><TagsSection /></ToastProvider>)
+    expect(screen.getByText("Loading…")).toBeInTheDocument()
+  })
+
+  it("shows an error state when the tags query fails", () => {
+    vi.mocked(api.useTags).mockReturnValue({ data: undefined, isLoading: false, isError: true } as never)
+    vi.mocked(api.useCreateTag).mockReturnValue(mut())
+    vi.mocked(api.useRenameTag).mockReturnValue(mut())
+    vi.mocked(api.useDeleteTag).mockReturnValue(mut())
+    render(<ToastProvider><TagsSection /></ToastProvider>)
+    expect(screen.getByText("Failed to load.")).toBeInTheDocument()
+  })
 })
