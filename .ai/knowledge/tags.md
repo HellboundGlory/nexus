@@ -19,14 +19,15 @@ Current **in-progress** sub-project (the one to resume). See
 
 - Branch `feat/tags` off master; execution is Subagent-Driven (sonnet
   implementers + reviewers, opus whole-branch review at the end).
-- **Tasks 1–7 done and reviewed clean** (store CRUD + associations + tag CRUD
-  API + media tag-assignment endpoints + `TagInput` + Settings → Tags page +
-  detail-page assignment).
-- **NEXT STEP, EXACTLY: dispatch Task 8** — rebuild `web/dist` and verify the
-  whole branch (the final, build-only task). BASE = `8596535` (current HEAD).
-  The branch was rebased onto `master` 034002b — task tips: T2 `3d84fba`,
-  T3 `1124ea6`, T4 `667236f`, T5 `9bb93de`, T6 `9b20232`,
-  T7 `3f2ead8` (+ fix `8596535`), T8 `<pending>`.
+- **ALL 8 TASKS DONE and reviewed clean** (store CRUD + associations + tag
+  CRUD API + media endpoints + `TagInput` + Settings page + detail pages +
+  web/dist rebuild).
+- **NEXT STEP, EXACTLY: whole-branch (opus) review** over `9de14af..HEAD`
+  (`feat/tags` HEAD = `13f405a`), then the user decides merge (and I ask before
+  pushing master — it publishes the image). The branch was rebased onto
+  `master` 034002b — task tips: T2 `3d84fba`, T3 `1124ea6`, T4 `667236f`,
+  T5 `9bb93de`, T6 `9b20232`, T7 `3f2ead8` (+ fix `8596535`),
+  T8 `13f405a`.
 - **Task 6 done (2026-08-04):** Settings → Tags page — spec ✅, quality
   Approved, all 3 mutations RED, added a route-pin test to
   `SettingsLayout.test.tsx` (so removing the `routes.tsx` route genuinely
