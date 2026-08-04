@@ -13,6 +13,7 @@ export const libraryKeys = {
   rootFolders: ["library", "rootfolders"] as const,
   qualityProfiles: ["library", "qualityprofiles"] as const,
   lookup: (term: string, kind: MediaKind) => ["library", "lookup", kind, term] as const,
+  tags: (kind: "series" | "movie", id: number) => ["library", "tags", kind, id] as const,
 }
 
 // ---- reads ----
@@ -40,6 +41,13 @@ export function useLookup(term: string, kind: MediaKind) {
     queryKey: libraryKeys.lookup(q, kind),
     queryFn: () => apiGet<MetadataResult[]>(`/media/lookup?term=${encodeURIComponent(q)}&kind=${kind}`),
     enabled: q.length > 0,
+  })
+}
+export function useMediaTags(kind: "series" | "movie", id: number) {
+  const path = kind === "series" ? `/series/${id}/tags` : `/movies/${id}/tags`
+  return useQuery({
+    queryKey: libraryKeys.tags(kind, id),
+    queryFn: async () => (await apiGet<{ tagIds: number[] }>(path)).tagIds,
   })
 }
 
@@ -115,6 +123,15 @@ export function useDeleteMovieFile() {
   return useMutation({
     mutationFn: (id: number) => apiDelete<{ ok: boolean }>(`/movies/${id}/file`),
     onSuccess: (_d, id) => qc.invalidateQueries({ queryKey: libraryKeys.movie(id) }),
+  })
+}
+
+export function useSetMediaTags(kind: "series" | "movie", id: number) {
+  const qc = useQueryClient()
+  const path = kind === "series" ? `/series/${id}/tags` : `/movies/${id}/tags`
+  return useMutation<{ ok: boolean }, Error, number[]>({
+    mutationFn: (tagIds) => apiPut<{ ok: boolean }>(path, { tagIds }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: libraryKeys.tags(kind, id) }),
   })
 }
 

@@ -3,9 +3,11 @@ import { useNavigate } from "react-router-dom"
 import { useToast } from "@/lib/toast"
 import {
   useMovieDetail, useQualityProfiles, useSetMonitored, useAssignProfile,
-  useRefresh, useDelete, useSearch, useDeleteMovieFile, libraryKeys,
+  useRefresh, useDelete, useSearch, useDeleteMovieFile, useMediaTags, useSetMediaTags, libraryKeys,
 } from "./api"
 import { Select } from "@/components/ui/select"
+import { TagInput } from "@/components/ui/tag-input"
+import { useTags, useCreateTag } from "@/features/settings/tagApi"
 import { StatusBadge, movieBadge } from "./StatusBadge"
 import { DetailBanner } from "./DetailBanner"
 import { InteractiveSearchDialog } from "@/features/search/InteractiveSearchDialog"
@@ -24,6 +26,10 @@ export function MovieDetail({ id }: { id: number }) {
   const del = useDelete()
   const search = useSearch()
   const delFile = useDeleteMovieFile()
+  const allTags = useTags()
+  const createTag = useCreateTag()
+  const mediaTags = useMediaTags("movie", id)
+  const setTags = useSetMediaTags("movie", id)
   const [searchTarget, setSearchTarget] = useState<SearchTarget | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
 
@@ -104,6 +110,15 @@ export function MovieDetail({ id }: { id: number }) {
               <option value="">{(profiles.data ?? []).length === 0 ? "No profiles" : "Quality profile…"}</option>
               {(profiles.data ?? []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
             </Select>
+          </div>
+          <div className="w-72">
+            <TagInput
+              aria-label="Tags"
+              value={mediaTags.data ?? []}
+              options={(allTags.data ?? []).map((t) => ({ id: t.id, label: t.label }))}
+              onChange={(ids) => setTags.mutate(ids)}
+              onCreate={async (label) => (await createTag.mutateAsync(label)).id}
+            />
           </div>
         </div>
       </DetailBanner>

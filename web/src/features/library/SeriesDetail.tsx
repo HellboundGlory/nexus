@@ -3,9 +3,11 @@ import { useNavigate } from "react-router-dom"
 import { useToast } from "@/lib/toast"
 import {
   useSeriesDetail, useQualityProfiles, useSetMonitored, useAssignProfile,
-  useRefresh, useDelete, useSearch, libraryKeys,
+  useRefresh, useDelete, useSearch, useMediaTags, useSetMediaTags, libraryKeys,
 } from "./api"
 import { Select } from "@/components/ui/select"
+import { TagInput } from "@/components/ui/tag-input"
+import { useTags, useCreateTag } from "@/features/settings/tagApi"
 import { StatusBadge, seriesBadge } from "./StatusBadge"
 import { SeasonTable } from "./SeasonTable"
 import { DetailBanner } from "./DetailBanner"
@@ -24,6 +26,10 @@ export function SeriesDetail({ id }: { id: number }) {
   const refresh = useRefresh(libraryKeys.seriesDetail(id))
   const del = useDelete()
   const search = useSearch()
+  const allTags = useTags()
+  const createTag = useCreateTag()
+  const mediaTags = useMediaTags("series", id)
+  const setTags = useSetMediaTags("series", id)
   const [searchTarget, setSearchTarget] = useState<SearchTarget | null>(null)
   const [searchTitle, setSearchTitle] = useState("")
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -84,6 +90,15 @@ export function SeriesDetail({ id }: { id: number }) {
               <option value="">{(profiles.data ?? []).length === 0 ? "No profiles" : "Quality profile…"}</option>
               {(profiles.data ?? []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
             </Select>
+          </div>
+          <div className="w-72">
+            <TagInput
+              aria-label="Tags"
+              value={mediaTags.data ?? []}
+              options={(allTags.data ?? []).map((t) => ({ id: t.id, label: t.label }))}
+              onChange={(ids) => setTags.mutate(ids)}
+              onCreate={async (label) => (await createTag.mutateAsync(label)).id}
+            />
           </div>
         </div>
       </DetailBanner>
