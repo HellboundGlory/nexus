@@ -19,21 +19,20 @@ Current **in-progress** sub-project (the one to resume). See
 
 - Branch `feat/tags` off master; execution is Subagent-Driven (sonnet
   implementers + reviewers, opus whole-branch review at the end).
-- **Tasks 1–3 done and reviewed clean** (store CRUD + associations + the
-  tag CRUD API).
-- **NEXT STEP, EXACTLY: dispatch Task 4** — the tag assignment endpoints on
-  the media routes (`internal/media/api.go` handlers appended after
-  `assignMovieProfile`; routes at `:33-54`). BASE for its review package =
-  `1124ea6` (Task 3's commit). The branch was rebased onto `master` 034002b, so
-  pre-rebase hashes (e.g. `b5312ee`) are stale — Task 2 ends at `3d84fba`,
-  Task 3 ends at `1124ea6`.
-- **Task 3 done (2026-08-04):** `internal/tag` CRUD API — spec ✅, quality
-  Approved; all 5 named mutations independently re-run by the reviewer
-  (1/3/4/5 RED, 2 GREEN confirming `ErrTagExists` vs `*TagInUseError` are
-  genuinely disjoint). Commit `1124ea6`. Deferred minor (whole-branch triage):
-  CRLF line-ending inconsistency inside `internal/tag` (`api.go` CRLF vs
-  `api_test.go` LF) — cosmetic; repo convention tolerates it (trust
-  build/vet over `gofmt -l`).
+- **Tasks 1–4 done and reviewed clean** (store CRUD + associations + tag CRUD
+  API + media tag-assignment endpoints).
+- **NEXT STEP, EXACTLY: dispatch Task 5** — the `TagInput` React component.
+  BASE for its review package = `667236f` (Task 4's commit). The branch was
+  rebased onto `master` 034002b, so pre-rebase hashes (e.g. `b5312ee`) are
+  stale — task tips: T2 `3d84fba`, T3 `1124ea6`, T4 `667236f`.
+- **Task 4 done (2026-08-04):** `GET|PUT /series/{id}/tags` and
+  `GET|PUT /movies/{id}/tags` in `internal/media` — spec ✅ byte-compliant,
+  quality Approved; all 4 named mutations independently re-run by the reviewer
+  (1/2/4 RED, incl. the fixture-trap target mutation 1 proving the
+  independent-rowid fixture catches a series/movie mixup; 3 GREEN confirming
+  `ErrTagNotFound` vs `ErrNotFound` are disjoint). Commit `667236f`. No new
+  deferred minors (only a stale `:638` doc anchor, already resolved in the
+  Task 4 addendum).
 - Plan: `docs/superpowers/plans/2026-07-25-nexus-tags.md` (8 TDD tasks);
   spec: `docs/superpowers/specs/2026-07-25-nexus-tags-design.md`.
 - The ledger (`.superpowers/sdd/2026-07-25-nexus-tags/progress.md`) tracks
