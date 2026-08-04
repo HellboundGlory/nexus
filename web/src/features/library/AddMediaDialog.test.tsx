@@ -1,11 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { ToastProvider } from "@/lib/toast"
 import { ApiError } from "@/lib/api"
 import { AddMediaDialog } from "@/features/library/AddMediaDialog"
 import * as lib from "@/features/library/api"
 import * as md from "@/features/settings/mediaDefaultsApi"
+import * as tagApi from "@/features/settings/tagApi"
 
 vi.mock("@/features/library/api", async (orig) => {
   const actual = await orig<typeof import("@/features/library/api")>()
@@ -16,23 +17,30 @@ vi.mock("@/features/library/api", async (orig) => {
     useQualityProfiles: vi.fn(),
     useAddMovie: vi.fn(),
     useAddSeries: vi.fn(),
+    useSetMediaTags: vi.fn(),
   }
 })
 vi.mock("@/features/settings/mediaDefaultsApi")
+vi.mock("@/features/settings/tagApi", async (orig) => {
+  const actual = await orig<typeof import("@/features/settings/tagApi")>()
+  return { ...actual, useTags: vi.fn() }
+})
+
+function stub() {
+  vi.mocked(lib.useLookup).mockReturnValue({ data: [{ tmdbId: 1, title: "Dune", year: 2021, overview: "", posterUrl: "", kind: "movie" }], isLoading: false } as unknown as ReturnType<typeof lib.useLookup>)
+  vi.mocked(lib.useAddMovie).mockReturnValue({ mutateAsync: vi.fn().mockResolvedValue({ id: 9 }), isPending: false } as unknown as ReturnType<typeof lib.useAddMovie>)
+  vi.mocked(lib.useAddSeries).mockReturnValue({ mutateAsync: vi.fn().mockResolvedValue({ id: 9 }), isPending: false } as unknown as ReturnType<typeof lib.useAddSeries>)
+  vi.mocked(lib.useSetMediaTags).mockReturnValue({ mutateAsync: vi.fn().mockResolvedValue({ ok: true }), isPending: false } as unknown as ReturnType<typeof lib.useSetMediaTags>)
+  vi.mocked(lib.useQualityProfiles).mockReturnValue({ data: [{ id: 5, name: "HD-1080p", cutoffQualityId: 7, upgradeAllowed: true, items: [], createdAt: "" }] } as unknown as ReturnType<typeof lib.useQualityProfiles>)
+  vi.mocked(tagApi.useTags).mockReturnValue({ data: [] } as unknown as ReturnType<typeof tagApi.useTags>)
+  vi.mocked(md.useMediaDefaults).mockReturnValue({ data: { movie: { rootFolderId: 1, qualityProfileId: 5 }, tv: { rootFolderId: null, qualityProfileId: null } } } as unknown as ReturnType<typeof md.useMediaDefaults>)
+}
 
 beforeEach(() => {
   vi.clearAllMocks()
   vi.mocked(lib.useQualityProfiles).mockReturnValue({ data: [] } as unknown as ReturnType<typeof lib.useQualityProfiles>)
   vi.mocked(md.useMediaDefaults).mockReturnValue({ data: { movie: { rootFolderId: null, qualityProfileId: null }, tv: { rootFolderId: null, qualityProfileId: null } } } as unknown as ReturnType<typeof md.useMediaDefaults>)
 })
-
-function stub() {
-  vi.mocked(lib.useLookup).mockReturnValue({ data: [{ tmdbId: 1, title: "Dune", year: 2021, overview: "", posterUrl: "", kind: "movie" }], isLoading: false } as unknown as ReturnType<typeof lib.useLookup>)
-  vi.mocked(lib.useAddMovie).mockReturnValue({ mutateAsync: vi.fn(), isPending: false } as unknown as ReturnType<typeof lib.useAddMovie>)
-  vi.mocked(lib.useAddSeries).mockReturnValue({ mutateAsync: vi.fn(), isPending: false } as unknown as ReturnType<typeof lib.useAddSeries>)
-  vi.mocked(lib.useQualityProfiles).mockReturnValue({ data: [{ id: 5, name: "HD-1080p", cutoffQualityId: 7, upgradeAllowed: true, items: [], createdAt: "" }] } as unknown as ReturnType<typeof lib.useQualityProfiles>)
-  vi.mocked(md.useMediaDefaults).mockReturnValue({ data: { movie: { rootFolderId: 1, qualityProfileId: 5 }, tv: { rootFolderId: null, qualityProfileId: null } } } as unknown as ReturnType<typeof md.useMediaDefaults>)
-}
 
 describe("AddMediaDialog", () => {
   it("blocks submit and guides to Settings when there are no root folders", async () => {
@@ -204,5 +212,90 @@ describe("AddMediaDialog", () => {
 
     expect(screen.getByText(/no quality profile configured/i)).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /add movie/i })).toBeDisabled()
+  })
+
+  it("shows a muted hint when there are no tags yet", async () => {
+    stub()
+    vi.mocked(lib.useRootFolders).mockReturnValue({ data: [{ id: 1, path: "/media/movies", createdAt: "" }] } as unknown as ReturnType<typeof lib.useRootFolders>)
+    render(
+      <ToastProvider>
+        <AddMediaDialog kind="movie" open onOpenChange={() => {}} />
+      </ToastProvider>,
+    )
+    await userEvent.type(screen.getByPlaceholderText(/search/i), "dune")
+    await userEvent.click(await screen.findByText("Dune"))
+    expect(screen.getByText(/no tags yet.*settings/i)).toBeInTheDocument()
+  })
+
+  it("toggles existing tag chips on and off in the add dialog", async () => {
+    stub()
+    vi.mocked(lib.useRootFolders).mockReturnValue({ data: [{ id: 1, path: "/media/movies", createdAt: "" }] } as unknown as ReturnType<typeof lib.useRootFolders>)
+    vi.mocked(tagApi.useTags).mockReturnValue({
+      data: [{ id: 8, label: "classics", seriesCount: 0, movieCount: 0 }],
+    } as unknown as ReturnType<typeof tagApi.useTags>)
+    render(
+      <ToastProvider>
+        <AddMediaDialog kind="movie" open onOpenChange={() => {}} />
+      </ToastProvider>,
+    )
+    await userEvent.type(screen.getByPlaceholderText(/search/i), "dune")
+    await userEvent.click(await screen.findByText("Dune"))
+
+    const chip = screen.getByRole("button", { name: "classics" })
+    expect(chip).toHaveAttribute("aria-pressed", "false")
+    await userEvent.click(chip)
+    expect(chip).toHaveAttribute("aria-pressed", "true")
+    await userEvent.click(chip)
+    expect(chip).toHaveAttribute("aria-pressed", "false")
+  })
+
+  it("assigns the selected tags to the new item after a successful add", async () => {
+    stub()
+    vi.mocked(lib.useAddMovie).mockReturnValue({ mutateAsync: vi.fn().mockResolvedValue({ id: 99 }), isPending: false } as unknown as ReturnType<typeof lib.useAddMovie>)
+    const setMutate = vi.fn().mockResolvedValue({ ok: true })
+    vi.mocked(lib.useSetMediaTags).mockReturnValue({ mutateAsync: setMutate, isPending: false } as unknown as ReturnType<typeof lib.useSetMediaTags>)
+    vi.mocked(lib.useRootFolders).mockReturnValue({ data: [{ id: 1, path: "/media/movies", createdAt: "" }] } as unknown as ReturnType<typeof lib.useRootFolders>)
+    vi.mocked(tagApi.useTags).mockReturnValue({
+      data: [
+        { id: 8, label: "classics", seriesCount: 0, movieCount: 0 },
+        { id: 9, label: "recent", seriesCount: 0, movieCount: 0 },
+      ],
+    } as unknown as ReturnType<typeof tagApi.useTags>)
+    render(
+      <ToastProvider>
+        <AddMediaDialog kind="movie" open onOpenChange={() => {}} />
+      </ToastProvider>,
+    )
+    await userEvent.type(screen.getByPlaceholderText(/search/i), "dune")
+    await userEvent.click(await screen.findByText("Dune"))
+
+    await userEvent.click(screen.getByRole("button", { name: "classics" }))
+    await userEvent.click(screen.getByRole("button", { name: "recent" }))
+    await userEvent.click(screen.getByRole("button", { name: /add movie/i }))
+
+    await waitFor(() => expect(setMutate).toHaveBeenCalledWith({ id: 99, tagIds: [8, 9] }))
+  })
+
+  it("does not call setTags when no tags are selected", async () => {
+    stub()
+    const addMutate = vi.fn().mockResolvedValue({ id: 99 })
+    vi.mocked(lib.useAddMovie).mockReturnValue({ mutateAsync: addMutate, isPending: false } as unknown as ReturnType<typeof lib.useAddMovie>)
+    const setMutate = vi.fn()
+    vi.mocked(lib.useSetMediaTags).mockReturnValue({ mutateAsync: setMutate, isPending: false } as unknown as ReturnType<typeof lib.useSetMediaTags>)
+    vi.mocked(lib.useRootFolders).mockReturnValue({ data: [{ id: 1, path: "/media/movies", createdAt: "" }] } as unknown as ReturnType<typeof lib.useRootFolders>)
+    vi.mocked(tagApi.useTags).mockReturnValue({
+      data: [{ id: 8, label: "classics", seriesCount: 0, movieCount: 0 }],
+    } as unknown as ReturnType<typeof tagApi.useTags>)
+    render(
+      <ToastProvider>
+        <AddMediaDialog kind="movie" open onOpenChange={() => {}} />
+      </ToastProvider>,
+    )
+    await userEvent.type(screen.getByPlaceholderText(/search/i), "dune")
+    await userEvent.click(await screen.findByText("Dune"))
+
+    await userEvent.click(screen.getByRole("button", { name: /add movie/i }))
+    await waitFor(() => expect(addMutate).toHaveBeenCalled())
+    expect(setMutate).not.toHaveBeenCalled()
   })
 })

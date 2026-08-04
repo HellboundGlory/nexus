@@ -3,11 +3,10 @@ import { useNavigate } from "react-router-dom"
 import { useToast } from "@/lib/toast"
 import {
   useMovieDetail, useQualityProfiles, useSetMonitored, useAssignProfile,
-  useRefresh, useDelete, useSearch, useDeleteMovieFile, useMediaTags, useSetMediaTags, libraryKeys,
+  useRefresh, useDelete, useSearch, useDeleteMovieFile, useMediaTags, libraryKeys,
 } from "./api"
 import { Select } from "@/components/ui/select"
-import { TagInput } from "@/components/ui/tag-input"
-import { useTags, useCreateTag } from "@/features/settings/tagApi"
+import { useTags } from "@/features/settings/tagApi"
 import { StatusBadge, movieBadge } from "./StatusBadge"
 import { DetailBanner } from "./DetailBanner"
 import { InteractiveSearchDialog } from "@/features/search/InteractiveSearchDialog"
@@ -27,11 +26,13 @@ export function MovieDetail({ id }: { id: number }) {
   const search = useSearch()
   const delFile = useDeleteMovieFile()
   const allTags = useTags()
-  const createTag = useCreateTag()
   const mediaTags = useMediaTags("movie", id)
-  const setTags = useSetMediaTags("movie", id)
   const [searchTarget, setSearchTarget] = useState<SearchTarget | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [showTags, setShowTags] = useState(false)
+  const assignedTags = (mediaTags.data ?? [])
+    .map((tid) => (allTags.data ?? []).find((t) => t.id === tid))
+    .filter((t): t is NonNullable<typeof t> => t != null)
 
   if (q.isLoading) return <div className="p-6 text-sm text-[var(--color-muted)]">Loading…</div>
   if (q.isError || !q.data) {
@@ -111,14 +112,22 @@ export function MovieDetail({ id }: { id: number }) {
               {(profiles.data ?? []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
             </Select>
           </div>
-          <div className="w-72">
-            <TagInput
-              aria-label="Tags"
-              value={mediaTags.data ?? []}
-              options={(allTags.data ?? []).map((t) => ({ id: t.id, label: t.label }))}
-              onChange={(ids) => setTags.mutate(ids)}
-              onCreate={async (label) => (await createTag.mutateAsync(label)).id}
-            />
+          <div
+            data-testid="tags-chip"
+            className="relative"
+            onMouseEnter={() => setShowTags(true)}
+            onMouseLeave={() => setShowTags(false)}
+          >
+            <span className="inline-flex items-center rounded-md border border-[var(--color-border)] bg-[var(--color-panel-2)] px-3 py-1.5 text-sm text-[var(--color-muted)]">
+              Tags
+            </span>
+            {showTags && (
+              <div className="absolute left-0 top-full z-10 mt-1 flex flex-col gap-1 rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] p-2 shadow-lg">
+                {assignedTags.length > 0
+                  ? assignedTags.map((t) => <span key={t.id} className="text-xs">{t.label}</span>)
+                  : <span className="text-xs text-[var(--color-muted)]">No tags.</span>}
+              </div>
+            )}
           </div>
         </div>
       </DetailBanner>

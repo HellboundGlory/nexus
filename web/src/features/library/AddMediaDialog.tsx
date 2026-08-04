@@ -4,9 +4,10 @@ import { Select } from "@/components/ui/select"
 import { ApiError } from "@/lib/api"
 import { useToast } from "@/lib/toast"
 import {
-  useLookup, useRootFolders, useQualityProfiles, useAddMovie, useAddSeries,
+  useLookup, useRootFolders, useQualityProfiles, useAddMovie, useAddSeries, useSetMediaTags,
 } from "./api"
 import { useMediaDefaults } from "@/features/settings/mediaDefaultsApi"
+import { useTags } from "@/features/settings/tagApi"
 import type { MetadataResult, MediaKind } from "./types"
 import { sortResults, type AddSort } from "./addSort"
 
@@ -26,6 +27,7 @@ export function AddMediaDialog({
   const [monitorOption, setMonitorOption] = useState<"all" | "future" | "none">("all")
   const [monitored, setMonitored] = useState(true)
   const [sort, setSort] = useState<AddSort>("relevance")
+  const [tagIds, setTagIds] = useState<number[]>([])
 
   // simple debounce
   useDebounce(term, 300, setDebounced)
@@ -36,6 +38,10 @@ export function AddMediaDialog({
   const mediaDefaults = useMediaDefaults()
   const addMovie = useAddMovie()
   const addSeries = useAddSeries()
+  const allTags = useTags()
+  // The add dialog speaks MediaKind ("movie" | "tv"); the tags API speaks the
+  // store's kind ("series" | "movie"). Map the show branch to "series".
+  const setTags = useSetMediaTags(kind === "tv" ? "series" : "movie")
 
   const noRoots = (rootFolders.data ?? []).length === 0
   const noProfiles = (qualityProfiles.data ?? []).length === 0
@@ -56,10 +62,16 @@ export function AddMediaDialog({
     const rfId = Number(rootFolderId) // gated non-empty by the Add button
     const qpId = Number(qualityProfileId) // gated non-empty by the Add button
     try {
-      if (kind === "movie") {
-        await addMovie.mutateAsync({ tmdbId: picked.tmdbId, rootFolderId: rfId, monitored, qualityProfileId: qpId })
-      } else {
-        await addSeries.mutateAsync({ tmdbId: picked.tmdbId, rootFolderId: rfId, monitorOption, qualityProfileId: qpId })
+      const created = kind === "movie"
+        ? await addMovie.mutateAsync({ tmdbId: picked.tmdbId, rootFolderId: rfId, monitored, qualityProfileId: qpId })
+        : await addSeries.mutateAsync({ tmdbId: picked.tmdbId, rootFolderId: rfId, monitorOption, qualityProfileId: qpId })
+      // Best-effort: a tag-assignment failure must not roll back the add.
+      if (tagIds.length > 0) {
+        try {
+          await setTags.mutateAsync({ id: created.id, tagIds })
+        } catch {
+          toast("Added, but tag assignment failed", { variant: "error" })
+        }
       }
       toast(`Added ${picked.title}`, { variant: "ok" })
       reset()
@@ -71,7 +83,7 @@ export function AddMediaDialog({
 
   function reset() {
     setTerm(""); setDebounced(""); setPicked(null); setRootFolderId(""); setQualityProfileId("")
-    setMonitorOption("all"); setMonitored(true); setSort("relevance")
+    setMonitorOption("all"); setMonitored(true); setSort("relevance"); setTagIds([])
   }
 
   return (
@@ -162,6 +174,34 @@ export function AddMediaDialog({
                 <option key={p.id} value={p.id}>{p.name}</option>
               ))}
             </Select>
+          )}
+
+          <label className="text-xs text-[var(--color-muted)]">Tags</label>
+          {(allTags.data ?? []).length === 0 ? (
+            <p className="text-sm text-[var(--color-muted)]">No tags yet — add some in Settings.</p>
+          ) : (
+            <div className="flex flex-wrap gap-1.5">
+              {(allTags.data ?? []).map((t) => {
+                const selected = tagIds.includes(t.id)
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    aria-pressed={selected}
+                    onClick={() =>
+                      setTagIds((prev) => (selected ? prev.filter((x) => x !== t.id) : [...prev, t.id]))
+                    }
+                    className={`rounded-full border px-2 py-0.5 text-xs ${
+                      selected
+                        ? "border-[var(--color-brand)] bg-[var(--color-brand)] text-white"
+                        : "border-[var(--color-border)] bg-[var(--color-panel-2)] text-[var(--color-muted)]"
+                    }`}
+                  >
+                    {t.label}
+                  </button>
+                )
+              })}
+            </div>
           )}
 
           {kind === "tv" ? (

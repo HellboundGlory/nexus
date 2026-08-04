@@ -49,17 +49,17 @@ describe("useMediaTags", () => {
 })
 
 describe("useSetMediaTags", () => {
-  it("PUTs the { tagIds } wrapper to the movie kind path", async () => {
+  it("PUTs the { tagIds } wrapper to the movie kind path from a { id, tagIds } variable", async () => {
     vi.mocked(apiClient.apiPut).mockResolvedValue({ ok: true })
-    const { result } = renderHook(() => useSetMediaTags("movie", 5), { wrapper: wrapper() })
-    result.current.mutate([8])
+    const { result } = renderHook(() => useSetMediaTags("movie"), { wrapper: wrapper() })
+    result.current.mutate({ id: 5, tagIds: [8] })
     await waitFor(() => expect(apiClient.apiPut).toHaveBeenCalledWith("/movies/5/tags", { tagIds: [8] }))
   })
 
-  it("PUTs the { tagIds } wrapper to the series kind path", async () => {
+  it("PUTs the { tagIds } wrapper to the series kind path from a { id, tagIds } variable", async () => {
     vi.mocked(apiClient.apiPut).mockResolvedValue({ ok: true })
-    const { result } = renderHook(() => useSetMediaTags("series", 3), { wrapper: wrapper() })
-    result.current.mutate([7])
+    const { result } = renderHook(() => useSetMediaTags("series"), { wrapper: wrapper() })
+    result.current.mutate({ id: 3, tagIds: [7] })
     await waitFor(() => expect(apiClient.apiPut).toHaveBeenCalledWith("/series/3/tags", { tagIds: [7] }))
   })
 })
