@@ -65,8 +65,10 @@ stable key.
 
 - GitHub account `HellboundGlory`; `gh` CLI and the GitHub MCP server are
   available (git credential manager supplies push creds).
-- Pushing `master` runs `docker-publish` → `ghcr.io/hellboundglory/nexus:latest`.
-  **Ask before pushing master.**
+- Pushing `master` runs `docker-publish` → `ghcr.io/hellboundglory/nexus:latest`
+  **only when build-relevant files change**; docs-only pushes are skipped by the
+  workflow's path filters (see [`deploy`](../workflows/deploy.md)). **Ask before
+  pushing master when the push is build-relevant.**
 - The three GitHub surfaces (REST API, web UI, raw content) and `git push` fail
   **independently** — see
   [`github-surfaces-fail-independently`](../memory/lessons/github-surfaces-fail-independently.md).

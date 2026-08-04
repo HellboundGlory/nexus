@@ -10,7 +10,7 @@ protected_paths:
   - "CLAUDE.md"
 # Machine-enforceable. Operation classes needing explicit confirmation:
 confirm_before:
-  - git-push-master           # pushes the prod image (docker-publish) — always ask
+  - git-push-master           # build-relevant push publishes the prod image — ask when it changes source
   - destructive-git-history   # rewrite/force-push of published history
   - release-signing           # creating a tagged release (no release process exists yet)
 summary: >
@@ -68,13 +68,17 @@ be told on their first day, so that agents get told them too.
 
 ## The one that matters: pushing master
 
-**Stop before pushing `master` — every time.** Pushing `master` triggers the
-`docker-publish` GitHub Actions workflow, which publishes the
-`ghcr.io/hellboundglory/nexus:latest` production image. It is outward-facing and
-users pull it. A merge to `master` was authorized by the user is separate from
-permission to push that merge — ask each time (see
-[`deploy`](../workflows/deploy.md)). Pushing a **feature branch** is not
-publishing and needs no such pause.
+**Stop before pushing `master` when the push is build-relevant.** The
+`docker-publish` GitHub Actions workflow publishes the
+`ghcr.io/hellboundglory/nexus:latest` production image — outward-facing, users
+pull it — but only when the pushed files can affect the image. A **docs-only**
+push (`.ai/**`, `*.md`, `README`, `docs/`, `.superpowers/`, `AGENTS.md`,
+`CLAUDE.md`, gitignore/gitattributes) is skipped by the workflow's path filter
+and publishes nothing, so it needs no deploy-pause. A push that changes Go or
+web source, `Dockerfile`, `go.mod`/`go.sum`, or the workflow itself **does**
+publish — for those, `merge`-authorized is separate from `push`-authorized; ask
+each time (see [`deploy`](../workflows/deploy.md)). Pushing a **feature branch**
+is never publishing.
 
 ## Execution
 

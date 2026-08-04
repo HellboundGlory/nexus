@@ -3,6 +3,22 @@ name: docker-publish
 on:
   push:
     branches: [master]
+    # Only build a new image when something that actually changes the image
+    # is touched. Docs/config/session drops (.ai/, *.md, README, docs, the
+    # .superpowers plugin folder, etc.) must NOT trigger a publish; Go or web
+    # source, the Dockerfile, go.mod/go.sum, and the workflow itself do.
+    # Push a v* tag or use workflow_dispatch to force a build anytime.
+    paths-ignore:
+      - "**/*.md"
+      - "AGENTS.md"
+      - "CLAUDE.md"
+      - ".ai/**"
+      - "docs/**"
+      - ".superpowers/**"
+      - ".gitignore"
+      - ".gitattributes"
+      - ".github/CODEOWNERS"
+      - "LICENSE*"
     tags: ["v*"]
   workflow_dispatch:
 

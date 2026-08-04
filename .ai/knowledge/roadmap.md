@@ -59,7 +59,11 @@ paths to an actual download. See [`automation-release-matching.md`](automation-r
 
 ## Operational invariants to preserve
 
-- **Ask before pushing master** (publishes the prod image) — every merge.
+- **Ask before pushing master when build-relevant.** The `docker-publish`
+  workflow publishes the prod image only when a push changes build-relevant
+  files (Go/web/Dockerfile); a docs-only push (`.ai/**`, `*.md`, `docs/`,
+  `.superpowers/`) is skipped by path filters and doesn't publish. See
+  [`deploy`](../workflows/deploy.md).
 - Every sub-project runs the SDD loop ([`sdd`](../workflows/sdd.md)) with the
   Subagent-Driven model; no scope expansion past what the user approved.
 - The database migration count assertion in
