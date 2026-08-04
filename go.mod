@@ -6,7 +6,7 @@ require (
 	github.com/go-chi/chi/v5 v5.3.0
 	github.com/gorilla/websocket v1.5.3
 	golang.org/x/crypto v0.53.0
-	golang.org/x/text v0.38.0
+	golang.org/x/text v0.39.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	modernc.org/sqlite v1.53.0
 )
