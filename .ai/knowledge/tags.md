@@ -39,8 +39,12 @@ Current **in-progress** sub-project (the one to resume). See
   assignable on detail pages and delete propagates everywhere; FK cascade +
   in-use-delete refusal mean no dangling chips.
 - **NEXT STEP: user decides "merge"**, then I ask before pushing `master`
-  (publishes the image). If the F1/F2 minor fixes are wanted, apply them on
-  `feat/tags` in the same branch before/at merge.
+  (publishes the image).
+- **Minor fixes F1+F2 closed (2026-08-04, commit `b37e24c`):** `TagsSection.test.tsx`
+  now covers the loading + error branches (mutation-verified RED); the em-dash
+  comments in `tag_store.go:146`/`tag_store_test.go:290` are ASCII now (other
+  branch Go files re-scanned clean). F3/F4 remain as noted (detail-page kind
+  literal, movie-side nil/empty) — non-blocking.
 - Branch tips (rebased on `master` 034002b): T2 `3d84fba`, T3 `1124ea6`,
   T4 `667236f`, T5 `9bb93de`, T6 `9b20232`, T7 `3f2ead8` (+ fix `8596535`),
   T8 `13f405a`.
