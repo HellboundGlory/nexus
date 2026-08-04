@@ -502,3 +502,125 @@ func TestDeleteSeriesRouteParsesDeleteFiles(t *testing.T) {
 		t.Fatalf("series folder should be gone, stat err = %v", err)
 	}
 }
+
+// tagReq issues a request against the media router and returns the recorder.
+func tagReq(t *testing.T, r http.Handler, method, path, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	return w
+}
+
+func seriesTagPath(id int64) string { return "/series/" + strconv.FormatInt(id, 10) + "/tags" }
+func movieTagPath(id int64) string  { return "/movies/" + strconv.FormatInt(id, 10) + "/tags" }
+
+func decodeTagIDs(t *testing.T, w *httptest.ResponseRecorder) []int64 {
+	t.Helper()
+	var got struct {
+		TagIDs []int64 `json:"tagIds"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode %s: %v", w.Body.String(), err)
+	}
+	return got.TagIDs
+}
+
+func TestSeriesAndMovieTagAssignment(t *testing.T) {
+	r, st := newTestAPI(t, &fakeProvider{})
+	ctx := context.Background()
+
+	tagA, err := st.CreateTag(ctx, "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tagB, err := st.CreateTag(ctx, "b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Two series, so the series id (2) and the movie id (1) differ and a
+	// series/movie mixup cannot pass by coincidence.
+	if _, err := st.CreateSeries(ctx, store.Series{TMDBID: 1, Title: "S1"}); err != nil {
+		t.Fatal(err)
+	}
+	sid, err := st.CreateSeries(ctx, store.Series{TMDBID: 2, Title: "S2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mid, err := st.CreateMovie(ctx, store.Movie{TMDBID: 3, Title: "M1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// series ids are 1,2 and movie ids start again at 1: the tagged series is
+	// 2 and the tagged movie is 1, so they differ. Asserted rather than assumed,
+	// because the two tables have independent rowid sequences.
+	if sid == mid {
+		t.Fatalf("fixture is degenerate: series id == movie id == %d", sid)
+	}
+
+	w := tagReq(t, r, http.MethodPut, seriesTagPath(sid), `{"tagIds":[`+strconv.FormatInt(tagA.ID, 10)+`]}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("put series tags: %d body=%s", w.Code, w.Body.String())
+	}
+	if got := decodeTagIDs(t, tagReq(t, r, http.MethodGet, seriesTagPath(sid), "")); len(got) != 1 || got[0] != tagA.ID {
+		t.Fatalf("series tags = %v want [%d]", got, tagA.ID)
+	}
+
+	w = tagReq(t, r, http.MethodPut, movieTagPath(mid), `{"tagIds":[`+strconv.FormatInt(tagB.ID, 10)+`]}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("put movie tags: %d body=%s", w.Code, w.Body.String())
+	}
+	if got := decodeTagIDs(t, tagReq(t, r, http.MethodGet, movieTagPath(mid), "")); len(got) != 1 || got[0] != tagB.ID {
+		t.Fatalf("movie tags = %v want [%d]", got, tagB.ID)
+	}
+	// The series must be untouched by the movie write.
+	if got := decodeTagIDs(t, tagReq(t, r, http.MethodGet, seriesTagPath(sid), "")); len(got) != 1 || got[0] != tagA.ID {
+		t.Fatalf("series tags changed after a movie write: %v", got)
+	}
+}
+
+func TestTagAssignmentErrors(t *testing.T) {
+	r, st := newTestAPI(t, &fakeProvider{})
+	ctx := context.Background()
+	sid, err := st.CreateSeries(ctx, store.Series{TMDBID: 1, Title: "S"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Unknown tag id -> 400, not a silent partial write.
+	if w := tagReq(t, r, http.MethodPut, seriesTagPath(sid), `{"tagIds":[999]}`); w.Code != http.StatusBadRequest {
+		t.Fatalf("unknown tag: %d body=%s", w.Code, w.Body.String())
+	}
+	// Unknown series -> 404.
+	if w := tagReq(t, r, http.MethodPut, "/series/999/tags", `{"tagIds":[]}`); w.Code != http.StatusNotFound {
+		t.Fatalf("unknown series: %d", w.Code)
+	}
+	// Malformed JSON -> 400.
+	if w := tagReq(t, r, http.MethodPut, seriesTagPath(sid), `{`); w.Code != http.StatusBadRequest {
+		t.Fatalf("bad json: %d", w.Code)
+	}
+	// Empty set is valid and clears.
+	if w := tagReq(t, r, http.MethodPut, seriesTagPath(sid), `{"tagIds":[]}`); w.Code != http.StatusOK {
+		t.Fatalf("clear: %d body=%s", w.Code, w.Body.String())
+	}
+	// GET on a tagless series returns [] not null.
+	if body := tagReq(t, r, http.MethodGet, seriesTagPath(sid), "").Body.String(); !strings.Contains(body, `"tagIds":[]`) {
+		t.Fatalf("expected an empty array, got %s", body)
+	}
+}
+
+// GET is deliberately lenient: reading the tags of a series that does not exist
+// returns 200 with an empty list rather than 404. TagsForSeries does no entity
+// lookup (only the write path does), and the detail page's own /series/{id}
+// request is what surfaces a missing series. Pinned so the leniency is a
+// decision rather than an accident.
+func TestGetTagsForMissingEntityIsLenient(t *testing.T) {
+	r, _ := newTestAPI(t, &fakeProvider{})
+	w := tagReq(t, r, http.MethodGet, "/series/999/tags", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d want 200", w.Code)
+	}
+	if got := decodeTagIDs(t, w); len(got) != 0 {
+		t.Fatalf("tags = %v want empty", got)
+	}
+}

@@ -38,6 +38,8 @@ func (a *API) Mount(r chi.Router) {
 		r.Post("/{id}/refresh", a.refreshSeries)
 		r.Put("/{id}/monitor", a.monitorSeries)
 		r.Put("/{id}/qualityprofile", a.assignSeriesProfile)
+		r.Get("/{id}/tags", a.getSeriesTags)
+		r.Put("/{id}/tags", a.setSeriesTags)
 	})
 	r.Put("/season/{id}/monitor", a.monitorSeason)
 	r.Put("/episode/{id}/monitor", a.monitorEpisode)
@@ -51,6 +53,8 @@ func (a *API) Mount(r chi.Router) {
 		r.Post("/{id}/refresh", a.refreshMovie)
 		r.Put("/{id}/monitor", a.monitorMovie)
 		r.Put("/{id}/qualityprofile", a.assignMovieProfile)
+		r.Get("/{id}/tags", a.getMovieTags)
+		r.Put("/{id}/tags", a.setMovieTags)
 	})
 
 	r.Route("/rootfolder", func(r chi.Router) {
@@ -632,6 +636,81 @@ func (a *API) assignMovieProfile(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeMediaError(w, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+type tagsBody struct {
+	TagIDs []int64 `json:"tagIds"`
+}
+
+func writeTagAssignError(w http.ResponseWriter, err error, entity string) {
+	switch {
+	case errors.Is(err, store.ErrTagNotFound):
+		api.WriteError(w, http.StatusBadRequest, "bad_request", "unknown tag id")
+	case errors.Is(err, store.ErrNotFound):
+		api.WriteError(w, http.StatusNotFound, "not_found", entity+" not found")
+	default:
+		api.WriteError(w, http.StatusInternalServerError, "internal", "internal error")
+	}
+}
+
+func (a *API) getSeriesTags(w http.ResponseWriter, r *http.Request) {
+	id, ok := mediaID(w, r)
+	if !ok {
+		return
+	}
+	ids, err := a.store.TagsForSeries(r.Context(), id)
+	if err != nil {
+		writeTagAssignError(w, err, "series")
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, tagsBody{TagIDs: ids})
+}
+
+func (a *API) setSeriesTags(w http.ResponseWriter, r *http.Request) {
+	id, ok := mediaID(w, r)
+	if !ok {
+		return
+	}
+	var b tagsBody
+	if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
+		api.WriteError(w, http.StatusBadRequest, "bad_request", "invalid JSON")
+		return
+	}
+	if err := a.store.SetSeriesTags(r.Context(), id, b.TagIDs); err != nil {
+		writeTagAssignError(w, err, "series")
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (a *API) getMovieTags(w http.ResponseWriter, r *http.Request) {
+	id, ok := mediaID(w, r)
+	if !ok {
+		return
+	}
+	ids, err := a.store.TagsForMovie(r.Context(), id)
+	if err != nil {
+		writeTagAssignError(w, err, "movie")
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, tagsBody{TagIDs: ids})
+}
+
+func (a *API) setMovieTags(w http.ResponseWriter, r *http.Request) {
+	id, ok := mediaID(w, r)
+	if !ok {
+		return
+	}
+	var b tagsBody
+	if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
+		api.WriteError(w, http.StatusBadRequest, "bad_request", "invalid JSON")
+		return
+	}
+	if err := a.store.SetMovieTags(r.Context(), id, b.TagIDs); err != nil {
+		writeTagAssignError(w, err, "movie")
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
