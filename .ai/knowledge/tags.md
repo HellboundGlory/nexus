@@ -19,12 +19,21 @@ Current **in-progress** sub-project (the one to resume). See
 
 - Branch `feat/tags` off master; execution is Subagent-Driven (sonnet
   implementers + reviewers, opus whole-branch review at the end).
-- **Tasks 1–2 done and reviewed clean** (store CRUD + tag associations).
-- **NEXT STEP, EXACTLY: dispatch Task 3** — the `internal/tag` CRUD API
-  package + `main.go` mount. BASE for its review package = the current
-  `feat/tags` HEAD. The branch was rebased onto `master`, so earlier hashes
-  moved (task 2 now ends at `3d84fba`); do not use pre-rebase hashes like
-  `b5312ee`.
+- **Tasks 1–3 done and reviewed clean** (store CRUD + associations + the
+  tag CRUD API).
+- **NEXT STEP, EXACTLY: dispatch Task 4** — the tag assignment endpoints on
+  the media routes (`internal/media/api.go` handlers appended after
+  `assignMovieProfile`; routes at `:33-54`). BASE for its review package =
+  `1124ea6` (Task 3's commit). The branch was rebased onto `master` 034002b, so
+  pre-rebase hashes (e.g. `b5312ee`) are stale — Task 2 ends at `3d84fba`,
+  Task 3 ends at `1124ea6`.
+- **Task 3 done (2026-08-04):** `internal/tag` CRUD API — spec ✅, quality
+  Approved; all 5 named mutations independently re-run by the reviewer
+  (1/3/4/5 RED, 2 GREEN confirming `ErrTagExists` vs `*TagInUseError` are
+  genuinely disjoint). Commit `1124ea6`. Deferred minor (whole-branch triage):
+  CRLF line-ending inconsistency inside `internal/tag` (`api.go` CRLF vs
+  `api_test.go` LF) — cosmetic; repo convention tolerates it (trust
+  build/vet over `gofmt -l`).
 - Plan: `docs/superpowers/plans/2026-07-25-nexus-tags.md` (8 TDD tasks);
   spec: `docs/superpowers/specs/2026-07-25-nexus-tags-design.md`.
 - The ledger (`.superpowers/sdd/2026-07-25-nexus-tags/progress.md`) tracks
