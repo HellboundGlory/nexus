@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, within, waitFor } from "@testing-library/react"
+import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { MemoryRouter } from "react-router-dom"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
@@ -14,13 +14,13 @@ vi.mock("@/features/library/api", async (orig) => {
     ...actual,
     useSeriesDetail: vi.fn(), useQualityProfiles: vi.fn(), useSetMonitored: vi.fn(),
     useAssignProfile: vi.fn(), useRefresh: vi.fn(), useDelete: vi.fn(), useSearch: vi.fn(),
-    useMediaTags: vi.fn(), useSetMediaTags: vi.fn(),
+    useMediaTags: vi.fn(),
   }
 })
 
 vi.mock("@/features/settings/tagApi", async (orig) => {
   const actual = await orig<typeof import("@/features/settings/tagApi")>()
-  return { ...actual, useTags: vi.fn(), useCreateTag: vi.fn() }
+  return { ...actual, useTags: vi.fn() }
 })
 beforeEach(() => vi.clearAllMocks())
 function mut(extra: object = {}) {
@@ -49,9 +49,7 @@ describe("SeriesDetail", () => {
     vi.mocked(lib.useDelete).mockReturnValue(mut())
     vi.mocked(lib.useSearch).mockReturnValue(mut({ mutate: search }))
     vi.mocked(lib.useMediaTags).mockReturnValue({ data: [] } as unknown as ReturnType<typeof lib.useMediaTags>)
-    vi.mocked(lib.useSetMediaTags).mockReturnValue(mut())
     vi.mocked(tagApi.useTags).mockReturnValue({ data: [], isLoading: false, isError: false } as never)
-    vi.mocked(tagApi.useCreateTag).mockReturnValue(mut())
 
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     render(
@@ -89,9 +87,7 @@ describe("SeriesDetail", () => {
     vi.mocked(lib.useDelete).mockReturnValue(mut())
     vi.mocked(lib.useSearch).mockReturnValue(mut({ mutate: search }))
     vi.mocked(lib.useMediaTags).mockReturnValue({ data: [] } as unknown as ReturnType<typeof lib.useMediaTags>)
-    vi.mocked(lib.useSetMediaTags).mockReturnValue(mut())
     vi.mocked(tagApi.useTags).mockReturnValue({ data: [], isLoading: false, isError: false } as never)
-    vi.mocked(tagApi.useCreateTag).mockReturnValue(mut())
 
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     render(
@@ -125,9 +121,7 @@ describe("SeriesDetail", () => {
     vi.mocked(lib.useDelete).mockReturnValue(mut({ mutate: del }))
     vi.mocked(lib.useSearch).mockReturnValue(mut())
     vi.mocked(lib.useMediaTags).mockReturnValue({ data: [] } as unknown as ReturnType<typeof lib.useMediaTags>)
-    vi.mocked(lib.useSetMediaTags).mockReturnValue(mut())
     vi.mocked(tagApi.useTags).mockReturnValue({ data: [], isLoading: false, isError: false } as never)
-    vi.mocked(tagApi.useCreateTag).mockReturnValue(mut())
 
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     render(
@@ -146,7 +140,7 @@ describe("SeriesDetail", () => {
     expect(del).toHaveBeenCalledWith(expect.objectContaining({ kind: "series", id: 3, deleteFiles: true }), expect.anything())
   })
 
-  function renderSeriesWithTags(setTags: ReturnType<typeof vi.fn>, createTag: ReturnType<typeof vi.fn>) {
+  function renderSeries(opts: { mediaTags?: number[]; tags?: { id: number; label: string; seriesCount: number; movieCount: number }[] } = {}) {
     vi.mocked(lib.useSeriesDetail).mockReturnValue({
       data: {
         id: 3, title: "The Bear", firstAired: "2022-06-23", overview: "", monitored: true,
@@ -161,13 +155,11 @@ describe("SeriesDetail", () => {
     vi.mocked(lib.useRefresh).mockReturnValue(mut())
     vi.mocked(lib.useDelete).mockReturnValue(mut())
     vi.mocked(lib.useSearch).mockReturnValue(mut())
-    vi.mocked(lib.useMediaTags).mockReturnValue({ data: [] } as unknown as ReturnType<typeof lib.useMediaTags>)
-    vi.mocked(lib.useSetMediaTags).mockReturnValue(mut({ mutate: setTags }))
+    vi.mocked(lib.useMediaTags).mockReturnValue({ data: opts.mediaTags ?? [] } as unknown as ReturnType<typeof lib.useMediaTags>)
     vi.mocked(tagApi.useTags).mockReturnValue({
-      data: [{ id: 7, label: "anime", seriesCount: 0, movieCount: 0 }],
+      data: opts.tags ?? [],
       isLoading: false, isError: false,
     } as never)
-    vi.mocked(tagApi.useCreateTag).mockReturnValue(mut({ mutateAsync: createTag }))
 
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     render(
@@ -180,26 +172,25 @@ describe("SeriesDetail", () => {
       </QueryClientProvider>,
     )
     // Pin the caller-side kind literal: a copy-paste bug (e.g. "movie" here)
-    // must not ship green even though the hooks themselves are mocked.
+    // must not ship green even though the hook itself is mocked.
     expect(lib.useMediaTags).toHaveBeenCalledWith("series", 3)
-    expect(lib.useSetMediaTags).toHaveBeenCalledWith("series", 3)
   }
 
-  it("assigns an existing tag to the series", async () => {
-    const setTags = vi.fn()
-    renderSeriesWithTags(setTags, vi.fn())
-    await userEvent.type(screen.getByLabelText("Tags"), "anime{Enter}")
-    await waitFor(() => expect(setTags).toHaveBeenCalledWith([7]))
+  it("renders a read-only Tags chip that reveals assigned tags on hover", async () => {
+    renderSeries({ mediaTags: [7], tags: [{ id: 7, label: "anime", seriesCount: 0, movieCount: 0 }] })
+    const chip = screen.getByTestId("tags-chip")
+    expect(chip).toBeInTheDocument()
+    // hidden until hover
+    expect(screen.queryByText("anime")).not.toBeInTheDocument()
+    await userEvent.hover(chip)
+    expect(screen.getByText("anime")).toBeInTheDocument()
+    await userEvent.unhover(chip)
+    expect(screen.queryByText("anime")).not.toBeInTheDocument()
   })
 
-  // Pins the seam between TagInput's onCreate contract and useCreateTag: a novel
-  // label must create the tag and then assign the id the server returned.
-  it("creates a new tag from the series detail page and assigns it", async () => {
-    const setTags = vi.fn()
-    const createTag = vi.fn().mockResolvedValue({ id: 42, label: "documentary", seriesCount: 0, movieCount: 0 })
-    renderSeriesWithTags(setTags, createTag)
-    await userEvent.type(screen.getByLabelText("Tags"), "documentary{Enter}")
-    await waitFor(() => expect(createTag).toHaveBeenCalledWith("documentary"))
-    await waitFor(() => expect(setTags).toHaveBeenCalledWith([42]))
+  it("shows 'No tags.' in the panel when nothing is assigned", async () => {
+    renderSeries({ tags: [{ id: 7, label: "anime", seriesCount: 0, movieCount: 0 }] })
+    await userEvent.hover(screen.getByTestId("tags-chip"))
+    expect(screen.getByText("No tags.")).toBeInTheDocument()
   })
 })

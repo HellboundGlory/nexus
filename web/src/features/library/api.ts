@@ -126,12 +126,14 @@ export function useDeleteMovieFile() {
   })
 }
 
-export function useSetMediaTags(kind: "series" | "movie", id: number) {
+export function useSetMediaTags(kind: "series" | "movie") {
   const qc = useQueryClient()
-  const path = kind === "series" ? `/series/${id}/tags` : `/movies/${id}/tags`
-  return useMutation<{ ok: boolean }, Error, number[]>({
-    mutationFn: (tagIds) => apiPut<{ ok: boolean }>(path, { tagIds }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: libraryKeys.tags(kind, id) }),
+  return useMutation<{ ok: boolean }, Error, { id: number; tagIds: number[] }>({
+    mutationFn: ({ id, tagIds }) => {
+      const path = kind === "series" ? `/series/${id}/tags` : `/movies/${id}/tags`
+      return apiPut<{ ok: boolean }>(path, { tagIds })
+    },
+    onSuccess: (_d, { id }) => qc.invalidateQueries({ queryKey: libraryKeys.tags(kind, id) }),
   })
 }
 
