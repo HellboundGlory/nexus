@@ -19,22 +19,24 @@ Current **in-progress** sub-project (the one to resume). See
 
 - Branch `feat/tags` off master; execution is Subagent-Driven (sonnet
   implementers + reviewers, opus whole-branch review at the end).
-- **Tasks 1–5 done and reviewed clean** (store CRUD + associations + tag CRUD
-  API + media tag-assignment endpoints + the `TagInput` component).
-- **NEXT STEP, EXACTLY: dispatch Task 6** — the Settings → Tags page that
-  wires `TagInput` to the tag API. BASE for its review package = `9bb93de`
-  (Task 5's commit). The branch was rebased onto `master` 034002b, so
-  pre-rebase hashes (e.g. `b5312ee`) are stale — task tips: T2 `3d84fba`,
-  T3 `1124ea6`, T4 `667236f`, T5 `9bb93de`.
-- **Task 5 done (2026-08-04):** pure `TagInput` component
-  (`web/src/components/ui/tag-input.tsx` + test) — spec ✅ behaviour contract
-  met, quality Approved; all 4 named mutations independently re-run by the
-  reviewer, each RED on the correct test (Enter-not-first-suggestion,
-  case-insensitive exact match, hide-selected filter, blank-Enter guard) — no
-  inert guards. Commit `9bb93de`. Source-only task: the component is
-  unimported until Task 6, so `web/dist` was NOT rebuilt and is unchanged.
-  Informational only: suggestion buttons omit `disabled={disabled}` (unreachable
-  — a disabled input can't be typed; matches plan byte-for-byte).
+- **Tasks 1–6 done and reviewed clean** (store CRUD + associations + tag CRUD
+  API + media tag-assignment endpoints + `TagInput` component + Settings →
+  Tags page).
+- **NEXT STEP, EXACTLY: dispatch Task 7** — Tags on the Series and Movie detail
+  pages (uses `TagInput`). BASE for its review package = `9b20232` (Task 6's
+  commit). The branch was rebased onto `master` 034002b, so pre-rebase hashes
+  (e.g. `b5312ee`) are stale — task tips: T2 `3d84fba`, T3 `1124ea6`,
+  T4 `667236f`, T5 `9bb93de`, T6 `9b20232`.
+- **Task 6 done (2026-08-04):** Settings → Tags page (`tagTypes`/`tagApi`/
+  `TagsSection` + test, TABS entry, routes.tsx route). spec ✅ byte-compliant,
+  quality Approved. All 3 named mutations independently re-run by the reviewer
+  (all RED). The implementer added a **route-pin test** to `SettingsLayout.test.tsx`
+  (`createMemoryRouter(router.routes, ...)`) so removing the `routes.tsx` route
+  genuinely fails (the pre-existing TABS-href test couldn't catch it) — valid
+  and approved by review. Commit `9b20232`. **Deferred minor (whole-branch
+  triage):** `TagsSection.test.tsx` doesn't cover the loading/error branches of
+  `TagsSection.tsx` (plan-originated gap; the repo testing policy wants both).
+  Source-only task: `web/dist` deliberately not rebuilt until Task 8.
 - Plan: `docs/superpowers/plans/2026-07-25-nexus-tags.md` (8 TDD tasks);
   spec: `docs/superpowers/specs/2026-07-25-nexus-tags-design.md`.
 - The ledger (`.superpowers/sdd/2026-07-25-nexus-tags/progress.md`) tracks
