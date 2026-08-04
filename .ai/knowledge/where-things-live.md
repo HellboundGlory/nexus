@@ -69,6 +69,9 @@ stable key.
   **only when build-relevant files change**; docs-only pushes are skipped by the
   workflow's path filters (see [`deploy`](../workflows/deploy.md)). **Ask before
   pushing master when the push is build-relevant.**
+- Each build-relevant `master` push also creates a **GitHub Release** with an
+  auto-generated grouped changelog (tagged by bare short SHA, displayed as
+  `v<shortsha>`); docs-only pushes create neither an image nor a release.
 - The three GitHub surfaces (REST API, web UI, raw content) and `git push` fail
   **independently** — see
   [`github-surfaces-fail-independently`](../memory/lessons/github-surfaces-fail-independently.md).

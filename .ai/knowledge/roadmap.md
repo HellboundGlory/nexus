@@ -4,20 +4,22 @@ title: Roadmap and Current State
 type: knowledge
 stability: evolving
 summary: >
-  The user-locked build order — SP-2 tags (in progress) → SP-3 release
-  profiles → Pokémon follow-ups → SP-C rename modal — plus the Discover-page
-  and anime-support TODOs, and the exact resume point at any time.
+  The user-locked build order — SP-2 tags (shipped) → SP-3 release profiles →
+  Pokémon follow-ups → SP-C rename modal — plus the Discover-page and
+  anime-support TODOs, and the exact resume point at any time.
 ---
 
 # Roadmap and Current State
 
 Nexus is feature-complete and pre-release: each sub-project ships as a
-reviewed, merged `master` and the user pulls the `:latest` image. There is no
-tagged release.
+reviewed, merged `master` and the user pulls the `:latest` image. Each
+build-relevant `master` push also creates a **GitHub Release** with an
+auto-changelog (see [`deploy`](../workflows/deploy.md)); there are no
+hand-tagged releases.
 
 ## The build order (locked by the user 2026-07-25 — do not re-ask)
 
-1. **SP-2: tags** — *in progress* (see [`tags.md`](tags.md)).
+1. **SP-2: tags** — **shipped** (2026-08-04; see [`tags.md`](tags.md)).
 2. **SP-3: release profiles** — the next sub-project after tags.
 3. **Pokémon follow-up A** — an SD-tolerant quality profile for the Pokémon
    (1997) series.
@@ -64,6 +66,10 @@ paths to an actual download. See [`automation-release-matching.md`](automation-r
   files (Go/web/Dockerfile); a docs-only push (`.ai/**`, `*.md`, `docs/`,
   `.superpowers/`) is skipped by path filters and doesn't publish. See
   [`deploy`](../workflows/deploy.md).
+- **Every build-relevant `master` push also creates a GitHub Release** with an
+  auto-generated grouped changelog (`.github/scripts/changelog.sh`), tagged by
+  bare short SHA and displayed as `v<shortsha>` (docs-only pushes produce
+  neither an image nor a release). Confirmed working on 2026-08-04.
 - Every sub-project runs the SDD loop ([`sdd`](../workflows/sdd.md)) with the
   Subagent-Driven model; no scope expansion past what the user approved.
 - The database migration count assertion in
