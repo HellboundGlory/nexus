@@ -22,11 +22,27 @@ Current **in-progress** sub-project (the one to resume). See
 - **ALL 8 TASKS DONE and reviewed clean** (store CRUD + associations + tag
   CRUD API + media endpoints + `TagInput` + Settings page + detail pages +
   web/dist rebuild).
-- **NEXT STEP, EXACTLY: whole-branch (opus) review** over `9de14af..HEAD`
-  (`feat/tags` HEAD = `13f405a`), then the user decides merge (and I ask before
-  pushing master — it publishes the image). The branch was rebased onto
-  `master` 034002b — task tips: T2 `3d84fba`, T3 `1124ea6`, T4 `667236f`,
-  T5 `9bb93de`, T6 `9b20232`, T7 `3f2ead8` (+ fix `8596535`),
+- **WHOLE-BRANCH (opus) REVIEW DONE (2026-08-04): verdict "Ready"** over
+  `master..HEAD` — no Critical/Important findings; Go 22 pkgs ok, FE 57/287,
+  verify-web green. Four Minor recommendations, none blocking:
+  F1 **fix** — `TagsSection.test.tsx` lacks loading/error-branch tests.
+  F2 **fix** — em-dash (`—`) comments in `internal/core/store/tag_store.go` +
+  `tag_store_test.go` violate the ASCII-Go-comments convention (build unaffected;
+  still worth correcting).
+  F3 **note** — detail-page component kind literal unpinned (hook-level
+  kind→path IS pinned; code correct).
+  F4 **note** — movie-side nil/empty guarantees unpinned (series-side only;
+  correct by shared generic helper).
+  Both GREEN mutations re-verified genuinely disjoint (T3-M2, T4-M3), and a
+  throwaway probe confirmed rename-to-self is not a false 404. Cross-task
+  seams checked: shared `tagKeys.all` means tags created in Settings are
+  assignable on detail pages and delete propagates everywhere; FK cascade +
+  in-use-delete refusal mean no dangling chips.
+- **NEXT STEP: user decides "merge"**, then I ask before pushing `master`
+  (publishes the image). If the F1/F2 minor fixes are wanted, apply them on
+  `feat/tags` in the same branch before/at merge.
+- Branch tips (rebased on `master` 034002b): T2 `3d84fba`, T3 `1124ea6`,
+  T4 `667236f`, T5 `9bb93de`, T6 `9b20232`, T7 `3f2ead8` (+ fix `8596535`),
   T8 `13f405a`.
 - **Task 6 done (2026-08-04):** Settings → Tags page — spec ✅, quality
   Approved, all 3 mutations RED, added a route-pin test to
