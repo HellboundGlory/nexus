@@ -131,8 +131,10 @@ jobs:
             range="$prev..${GITHUB_SHA}"
             link="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/compare/${prev}...${GITHUB_SHA}"
           else
-            # First release for the repo: use this push's own commit range.
-            range="${GITHUB_EVENT_BEFORE}..${GITHUB_SHA}"
+            # First release for the repo: diff this push against its parent.
+            # Use the event context (`github.event.before`), not a shell env var
+            # — GITHUB_EVENT_BEFORE is not a real Actions variable.
+            range="${{ github.event.before }}..${GITHUB_SHA}"
             link=""
           fi
           bash .github/scripts/changelog.sh "$range" > CHANGELOG.md
