@@ -179,6 +179,10 @@ describe("SeriesDetail", () => {
         </MemoryRouter>
       </QueryClientProvider>,
     )
+    // Pin the caller-side kind literal: a copy-paste bug (e.g. "movie" here)
+    // must not ship green even though the hooks themselves are mocked.
+    expect(lib.useMediaTags).toHaveBeenCalledWith("series", 3)
+    expect(lib.useSetMediaTags).toHaveBeenCalledWith("series", 3)
   }
 
   it("assigns an existing tag to the series", async () => {

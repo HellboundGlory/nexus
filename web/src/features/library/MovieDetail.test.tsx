@@ -52,6 +52,10 @@ function renderMovie(id: number, movie: object, search = vi.fn(), delFile = vi.f
       </MemoryRouter>
     </QueryClientProvider>,
   )
+  // Pin the caller-side kind literal: a copy-paste bug (e.g. "series" here)
+  // must not ship green even though the hooks themselves are mocked.
+  expect(lib.useMediaTags).toHaveBeenCalledWith("movie", id)
+  expect(lib.useSetMediaTags).toHaveBeenCalledWith("movie", id)
   return search
 }
 
