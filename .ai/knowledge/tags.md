@@ -19,20 +19,22 @@ Current **in-progress** sub-project (the one to resume). See
 
 - Branch `feat/tags` off master; execution is Subagent-Driven (sonnet
   implementers + reviewers, opus whole-branch review at the end).
-- **Tasks 1–4 done and reviewed clean** (store CRUD + associations + tag CRUD
-  API + media tag-assignment endpoints).
-- **NEXT STEP, EXACTLY: dispatch Task 5** — the `TagInput` React component.
-  BASE for its review package = `667236f` (Task 4's commit). The branch was
-  rebased onto `master` 034002b, so pre-rebase hashes (e.g. `b5312ee`) are
-  stale — task tips: T2 `3d84fba`, T3 `1124ea6`, T4 `667236f`.
-- **Task 4 done (2026-08-04):** `GET|PUT /series/{id}/tags` and
-  `GET|PUT /movies/{id}/tags` in `internal/media` — spec ✅ byte-compliant,
-  quality Approved; all 4 named mutations independently re-run by the reviewer
-  (1/2/4 RED, incl. the fixture-trap target mutation 1 proving the
-  independent-rowid fixture catches a series/movie mixup; 3 GREEN confirming
-  `ErrTagNotFound` vs `ErrNotFound` are disjoint). Commit `667236f`. No new
-  deferred minors (only a stale `:638` doc anchor, already resolved in the
-  Task 4 addendum).
+- **Tasks 1–5 done and reviewed clean** (store CRUD + associations + tag CRUD
+  API + media tag-assignment endpoints + the `TagInput` component).
+- **NEXT STEP, EXACTLY: dispatch Task 6** — the Settings → Tags page that
+  wires `TagInput` to the tag API. BASE for its review package = `9bb93de`
+  (Task 5's commit). The branch was rebased onto `master` 034002b, so
+  pre-rebase hashes (e.g. `b5312ee`) are stale — task tips: T2 `3d84fba`,
+  T3 `1124ea6`, T4 `667236f`, T5 `9bb93de`.
+- **Task 5 done (2026-08-04):** pure `TagInput` component
+  (`web/src/components/ui/tag-input.tsx` + test) — spec ✅ behaviour contract
+  met, quality Approved; all 4 named mutations independently re-run by the
+  reviewer, each RED on the correct test (Enter-not-first-suggestion,
+  case-insensitive exact match, hide-selected filter, blank-Enter guard) — no
+  inert guards. Commit `9bb93de`. Source-only task: the component is
+  unimported until Task 6, so `web/dist` was NOT rebuilt and is unchanged.
+  Informational only: suggestion buttons omit `disabled={disabled}` (unreachable
+  — a disabled input can't be typed; matches plan byte-for-byte).
 - Plan: `docs/superpowers/plans/2026-07-25-nexus-tags.md` (8 TDD tasks);
   spec: `docs/superpowers/specs/2026-07-25-nexus-tags-design.md`.
 - The ledger (`.superpowers/sdd/2026-07-25-nexus-tags/progress.md`) tracks
