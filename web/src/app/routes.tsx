@@ -10,6 +10,7 @@ import { Navigate } from "react-router-dom"
 import { SettingsLayout } from "@/features/settings/SettingsLayout"
 import { ConnectionsSection } from "@/features/settings/ConnectionsSection"
 import { QualityProfilesSection } from "@/features/settings/QualityProfilesSection"
+import { ReleaseProfilesSection } from "@/features/settings/ReleaseProfilesSection"
 import { TagsSection } from "@/features/settings/TagsSection"
 import { RootFoldersSection } from "@/features/settings/RootFoldersSection"
 import { NamingSection } from "@/features/settings/NamingSection"
@@ -58,6 +59,7 @@ export const router = createBrowserRouter([
           { path: "indexers", element: <ConnectionsSection kind="indexer" /> },
           { path: "downloadclients", element: <ConnectionsSection kind="downloadclient" /> },
           { path: "qualityprofiles", element: <QualityProfilesSection /> },
+          { path: "releaseprofiles", element: <ReleaseProfilesSection /> },
           { path: "tags", element: <TagsSection /> },
           { path: "rootfolders", element: <RootFoldersSection /> },
           { path: "naming", element: <NamingSection /> },
