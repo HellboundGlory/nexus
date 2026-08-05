@@ -120,15 +120,16 @@ func (s *Store) RenameTag(ctx context.Context, id int64, label string) error {
 }
 
 func (s *Store) DeleteTag(ctx context.Context, id int64) error {
-	var seriesCount, movieCount int
+	var seriesCount, movieCount, profileCount int
 	err := s.db.QueryRowContext(ctx,
 		`SELECT (SELECT COUNT(*) FROM series_tags WHERE tag_id = ?),
-		        (SELECT COUNT(*) FROM movie_tags  WHERE tag_id = ?)`, id, id).
-		Scan(&seriesCount, &movieCount)
+		        (SELECT COUNT(*) FROM movie_tags  WHERE tag_id = ?),
+		        (SELECT COUNT(*) FROM release_profile_tags WHERE tag_id = ?)`, id, id, id).
+		Scan(&seriesCount, &movieCount, &profileCount)
 	if err != nil {
 		return err
 	}
-	if seriesCount > 0 || movieCount > 0 {
+	if seriesCount > 0 || movieCount > 0 || profileCount > 0 {
 		return &TagInUseError{SeriesCount: seriesCount, MovieCount: movieCount}
 	}
 	res, err := s.db.ExecContext(ctx, `DELETE FROM tags WHERE id = ?`, id)
