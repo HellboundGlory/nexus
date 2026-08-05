@@ -23,15 +23,16 @@ var ErrTagNotFound = errors.New("store: tag not found")
 // is *TagInUseError, which carries the counts; errors.Is matches this sentinel.
 var ErrTagInUse = errors.New("store: tag in use")
 
-// TagInUseError reports how many series and movies still reference a tag, so
-// the API can name them in the 409 without a second query.
+// TagInUseError reports how many series, movies, and release profiles still
+// reference a tag, so the API can name them in the 409 without a second query.
 type TagInUseError struct {
-	SeriesCount int
-	MovieCount  int
+	SeriesCount  int
+	MovieCount   int
+	ProfileCount int
 }
 
 func (e *TagInUseError) Error() string {
-	return fmt.Sprintf("store: tag in use by %d series and %d movies", e.SeriesCount, e.MovieCount)
+	return fmt.Sprintf("store: tag in use by %d series, %d movies, and %d profiles", e.SeriesCount, e.MovieCount, e.ProfileCount)
 }
 
 func (e *TagInUseError) Is(target error) bool { return target == ErrTagInUse }
@@ -130,7 +131,7 @@ func (s *Store) DeleteTag(ctx context.Context, id int64) error {
 		return err
 	}
 	if seriesCount > 0 || movieCount > 0 || profileCount > 0 {
-		return &TagInUseError{SeriesCount: seriesCount, MovieCount: movieCount}
+		return &TagInUseError{SeriesCount: seriesCount, MovieCount: movieCount, ProfileCount: profileCount}
 	}
 	res, err := s.db.ExecContext(ctx, `DELETE FROM tags WHERE id = ?`, id)
 	if err != nil {

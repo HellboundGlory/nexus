@@ -343,28 +343,28 @@ func (s *Service) RSSSync(ctx context.Context) (RSSResult, error) {
 		}
 	}
 
-	// Resolve release profiles once per target (not per release): load the full
-	// set once, then intersect each target's tags. A no-tag profile applies to
-	// every target.
+	// Resolve release profiles once per sweep, not per target: load the full set
+	// once plus the batch tag->profile maps, then resolve each target through
+	// rpsForEntity. A no-tag profile applies to every target.
 	allProfiles, err := s.store.ListReleaseProfiles(ctx)
+	if err != nil {
+		return res, err
+	}
+	movieProfileIDs, err := s.store.MovieReleaseProfileIDs(ctx)
+	if err != nil {
+		return res, err
+	}
+	seriesProfileIDs, err := s.store.SeriesReleaseProfileIDs(ctx)
 	if err != nil {
 		return res, err
 	}
 	movieProfiles := map[int64][]store.ReleaseProfile{}
 	for movieID := range movieTargets {
-		tags, err := s.store.TagsForMovie(ctx, movieID)
-		if err != nil {
-			return res, err
-		}
-		movieProfiles[movieID] = applicableReleaseProfiles(allProfiles, tags)
+		movieProfiles[movieID] = rpsForEntity(allProfiles, movieProfileIDs, movieID)
 	}
 	tvProfiles := map[int64][]store.ReleaseProfile{}
 	for seriesID := range tvTargets {
-		tags, err := s.store.TagsForSeries(ctx, seriesID)
-		if err != nil {
-			return res, err
-		}
-		tvProfiles[seriesID] = applicableReleaseProfiles(allProfiles, tags)
+		tvProfiles[seriesID] = rpsForEntity(allProfiles, seriesProfileIDs, seriesID)
 	}
 
 	activeMovies, activeEps, inFlight, err := s.activeQueue(ctx)

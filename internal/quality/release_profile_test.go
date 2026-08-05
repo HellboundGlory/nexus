@@ -8,7 +8,7 @@ import (
 
 func TestRequiredAny(t *testing.T) {
 	p := store.ReleaseProfile{RequiredMode: "any", RequiredAny: []string{"1080p", "bluray"}}
-	// Candidate matching exactly one of two terms — the only shape that
+	// Candidate matching exactly one of two terms - the only shape that
 	// discriminates any from all.
 	if m := MatchReleaseProfile("Show.S01E01.1080p.WEB-DL", p); !m.Accepted {
 		t.Fatalf("expected accepted, got %+v", m)
