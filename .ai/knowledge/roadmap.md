@@ -20,11 +20,9 @@ hand-tagged releases.
 ## The build order (locked by the user 2026-07-25 — do not re-ask)
 
 1. **SP-2: tags** — **shipped** (2026-08-04; see [`tags.md`](tags.md)).
-2. **SP-3: release profiles** — **implemented on `feat/release-profiles`**
-   (whole branch green: build + vet + all 23 pkgs + FE typecheck, 2026-08-05);
-   **awaiting whole-branch review → merge → push** (see
-   [`release-profiles.md`](release-profiles.md)). Then the next sub-project
-   after merge.
+2. **SP-3: release profiles** — **shipped** (merged to `master` 2026-08-05;
+   see [`release-profiles.md`](release-profiles.md)). The next sub-project
+   starts now.
 3. **Pokémon follow-up A** — an SD-tolerant quality profile for the Pokémon
    (1997) series.
 4. **Pokémon follow-up B** — proper anime support (absolute numbering).

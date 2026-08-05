@@ -13,10 +13,10 @@ summary: >
 
 # Release Profiles (SP-3)
 
-**IMPLEMENTED on `feat/release-profiles` (2026-08-05).** Whole branch green
-(build + vet + all 23 Go packages + FE typecheck + `web/dist` rebuilt), but not
-yet merged to `master`. See [`roadmap.md`](roadmap.md) for the merge/push gate.
-Spec
+**IMPLEMENTED on `feat/release-profiles` (2026-08-05), merged to `master`
+2026-08-05.** Whole branch green (build + vet + all 23 Go packages + FE
+typecheck + `web/dist` rebuilt). See [`roadmap.md`](roadmap.md) for the build
+order. Spec
 `docs/superpowers/specs/2026-08-05-nexus-release-profiles-design.md`; plan
 `docs/superpowers/plans/2026-08-05-nexus-release-profiles.md` (5 TDD tasks).
 
@@ -82,10 +82,9 @@ Spec
 
 ## Status
 
-- **Whole-branch review (2026-08-05): Ready to merge — 0 Critical.** All
-  findings addressed: RSS wired to the batch readers once per sweep (plan §6.1),
-  per-path + tag-scoped gate tests added (all 10 mutation-verified — removing
-  the `Decide` rejection loop turns all of them red), non-ASCII comment fixed,
-  `DeleteTag` reports profile count.
-- **MERGE PENDING** on `feat/release-profiles` (not yet on `master`); after
-  merge, reconcile this page if any production behavior differs.
+- **Shipped: merged to `master` 2026-08-05 (commit `6c558f0`).** Whole-branch
+  review was clean — 0 Critical, all findings addressed: RSS wired to the batch
+  readers once per sweep (plan §6.1), per-path + tag-scoped gate tests added
+  (all 10 mutation-verified — removing the `Decide` rejection loop turns all of
+  them red), non-ASCII comment fixed, `DeleteTag` reports profile count.
+- This page was reconciled post-merge to reflect shipped status.
