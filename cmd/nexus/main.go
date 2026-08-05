@@ -35,6 +35,7 @@ import (
 	"github.com/hellboundg/nexus/internal/indexer"
 	"github.com/hellboundg/nexus/internal/media"
 	"github.com/hellboundg/nexus/internal/quality"
+	"github.com/hellboundg/nexus/internal/releaseprofile"
 	"github.com/hellboundg/nexus/internal/tag"
 	"github.com/hellboundg/nexus/web"
 )
@@ -138,6 +139,7 @@ func run(ctx context.Context) error {
 	qualityAPI := quality.NewAPI(qualitySvc)
 
 	tagAPI := tag.NewAPI(st)
+	releaseProfileAPI := releaseprofile.NewAPI(st)
 
 	importSvc := importing.NewService(st, dlSvc, dlQueueAdapter{svc: dlSvc}, bus)
 	importAPI := importing.NewAPI(importSvc)
@@ -186,7 +188,7 @@ func run(ctx context.Context) error {
 	router := api.NewRouter(api.Deps{
 		Auth: authSvc, Store: st, Version: version.Version(), Bus: bus, Tasks: sch,
 		WSForward: []string{"indexer.status", "download.status", "media.series.updated", "media.movie.updated", "import.completed", "queue.updated", "automation.search.completed", "automation.rss.completed", "automation.upgrade.completed", "download.failed", "task.updated"},
-	}, web.Handler(), idxAPI.Mount, dlAPI.Mount, mediaAPI.Mount, qualityAPI.Mount, importAPI.Mount, autoAPI.Mount, tagAPI.Mount)
+	}, web.Handler(), idxAPI.Mount, dlAPI.Mount, mediaAPI.Mount, qualityAPI.Mount, importAPI.Mount, autoAPI.Mount, tagAPI.Mount, releaseProfileAPI.Mount)
 
 	srv := &http.Server{Addr: cfg.Addr(), Handler: router}
 	go func() {
