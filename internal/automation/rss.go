@@ -343,6 +343,30 @@ func (s *Service) RSSSync(ctx context.Context) (RSSResult, error) {
 		}
 	}
 
+	// Resolve release profiles once per target (not per release): load the full
+	// set once, then intersect each target's tags. A no-tag profile applies to
+	// every target.
+	allProfiles, err := s.store.ListReleaseProfiles(ctx)
+	if err != nil {
+		return res, err
+	}
+	movieProfiles := map[int64][]store.ReleaseProfile{}
+	for movieID := range movieTargets {
+		tags, err := s.store.TagsForMovie(ctx, movieID)
+		if err != nil {
+			return res, err
+		}
+		movieProfiles[movieID] = applicableReleaseProfiles(allProfiles, tags)
+	}
+	tvProfiles := map[int64][]store.ReleaseProfile{}
+	for seriesID := range tvTargets {
+		tags, err := s.store.TagsForSeries(ctx, seriesID)
+		if err != nil {
+			return res, err
+		}
+		tvProfiles[seriesID] = applicableReleaseProfiles(allProfiles, tags)
+	}
+
 	activeMovies, activeEps, inFlight, err := s.activeQueue(ctx)
 	if err != nil {
 		return res, err
@@ -366,7 +390,7 @@ func (s *Service) RSSSync(ctx context.Context) (RSSResult, error) {
 		if !ok {
 			continue
 		}
-		cands := Decide(rels, provider.KindMovie, profile)
+		cands := Decide(rels, provider.KindMovie, profile, movieProfiles[movieID])
 		mid := movieID
 		blocked, err := s.store.BlocklistedTitles(ctx, &mid, nil)
 		if err != nil {
@@ -405,7 +429,7 @@ func (s *Service) RSSSync(ctx context.Context) (RSSResult, error) {
 		if err != nil {
 			return res, err
 		}
-		ranked := Decide(rels, provider.KindTV, profile)
+		ranked := Decide(rels, provider.KindTV, profile, tvProfiles[seriesID])
 		bud := newBudget(cfg.MaxConcurrentPerSeries, inFlight[seriesID])
 		n, err := s.rssPlaceTV(ctx, se, eps, ranked, activeEps, bud)
 		if err != nil {
