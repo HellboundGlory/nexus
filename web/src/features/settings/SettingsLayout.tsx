@@ -5,6 +5,7 @@ const TABS: { to: string; label: string }[] = [
   { to: "/settings/indexers", label: "Indexers" },
   { to: "/settings/downloadclients", label: "Download Clients" },
   { to: "/settings/qualityprofiles", label: "Quality Profiles" },
+  { to: "/settings/releaseprofiles", label: "Release Profiles" },
   { to: "/settings/tags", label: "Tags" },
   { to: "/settings/rootfolders", label: "Root Folders" },
   { to: "/settings/naming", label: "Naming" },

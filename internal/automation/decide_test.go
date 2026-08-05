@@ -22,7 +22,7 @@ func seedersPtr(n int) *int { return &n }
 
 func TestDecideDropsDisallowedQuality(t *testing.T) {
 	rel := provider.Release{Title: "The.Show.S01E01.720p.BluRay.x264-GRP", Protocol: provider.ProtocolUsenet}
-	got := Decide([]provider.Release{rel}, provider.KindTV, hdProfile())
+	got := Decide([]provider.Release{rel}, provider.KindTV, hdProfile(), nil)
 	if len(got) != 0 {
 		t.Fatalf("Bluray-720p is not in the HD profile; want 0 candidates, got %d", len(got))
 	}
@@ -31,7 +31,7 @@ func TestDecideDropsDisallowedQuality(t *testing.T) {
 func TestDecideRanksHigherQualityFirst(t *testing.T) {
 	web := provider.Release{Title: "The.Show.S01E01.1080p.WEB-DL.x264-GRP", Protocol: provider.ProtocolUsenet}
 	blu := provider.Release{Title: "The.Show.S01E01.1080p.BluRay.x264-GRP", Protocol: provider.ProtocolUsenet}
-	got := Decide([]provider.Release{web, blu}, provider.KindTV, hdProfile())
+	got := Decide([]provider.Release{web, blu}, provider.KindTV, hdProfile(), nil)
 	if len(got) != 2 {
 		t.Fatalf("want 2 accepted, got %d", len(got))
 	}
@@ -43,7 +43,7 @@ func TestDecideRanksHigherQualityFirst(t *testing.T) {
 func TestDecideTorrentSeedersTiebreak(t *testing.T) {
 	low := provider.Release{Title: "The.Show.S01E01.1080p.BluRay.x264-GRP", Protocol: provider.ProtocolTorrent, Seeders: seedersPtr(3)}
 	high := provider.Release{Title: "The.Show.S01E01.1080p.BluRay.x264-OTHER", Protocol: provider.ProtocolTorrent, Seeders: seedersPtr(50)}
-	got := Decide([]provider.Release{low, high}, provider.KindTV, hdProfile())
+	got := Decide([]provider.Release{low, high}, provider.KindTV, hdProfile(), nil)
 	if len(got) != 2 || got[0].Release.Seeders == nil || *got[0].Release.Seeders != 50 {
 		t.Fatalf("more seeders should rank first, got %+v", got)
 	}
@@ -52,7 +52,7 @@ func TestDecideTorrentSeedersTiebreak(t *testing.T) {
 func TestDecideUsenetAgeThenSizeTiebreak(t *testing.T) {
 	older := provider.Release{Title: "The.Show.S01E01.1080p.BluRay.x264-GRP", Protocol: provider.ProtocolUsenet, PublishDate: time.Unix(1000, 0), Size: 100}
 	newer := provider.Release{Title: "The.Show.S01E01.1080p.BluRay.x264-NEW", Protocol: provider.ProtocolUsenet, PublishDate: time.Unix(2000, 0), Size: 100}
-	got := Decide([]provider.Release{older, newer}, provider.KindTV, hdProfile())
+	got := Decide([]provider.Release{older, newer}, provider.KindTV, hdProfile(), nil)
 	if len(got) != 2 || !got[0].Release.PublishDate.Equal(time.Unix(2000, 0)) {
 		t.Fatalf("newer usenet should rank first, got %+v", got)
 	}

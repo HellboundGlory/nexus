@@ -221,7 +221,11 @@ func (s *Service) upgradeMovie(ctx context.Context, m store.Movie, f *store.Medi
 	if err != nil {
 		slog.Warn("automation: upgrade movie search had indexer errors", "movieId", m.ID, "err", err)
 	}
-	cands := upgradeCandidates(Decide(releases, provider.KindMovie, profile), f.QualityID, profile, movieKey(m.ID), cs)
+	rps, err := s.releaseProfilesForMovie(ctx, m.ID)
+	if err != nil {
+		return 0, err
+	}
+	cands := upgradeCandidates(Decide(releases, provider.KindMovie, profile, rps), f.QualityID, profile, movieKey(m.ID), cs)
 	blocked, err := s.store.BlocklistedTitles(ctx, &m.ID, nil)
 	if err != nil {
 		slog.Warn("automation: blocklist lookup failed", "movieId", m.ID, "err", err)
@@ -248,8 +252,12 @@ func (s *Service) upgradeEpisode(ctx context.Context, se *store.Series, e store.
 	if err != nil {
 		slog.Warn("automation: upgrade episode search had indexer errors", "episodeId", e.ID, "err", err)
 	}
+	rps, err := s.releaseProfilesForSeries(ctx, se.ID)
+	if err != nil {
+		return 0, err
+	}
 	var covering []Candidate
-	for _, c := range Decide(releases, provider.KindTV, profile) {
+	for _, c := range Decide(releases, provider.KindTV, profile, rps) {
 		// Same loose-`q` hazard as the search path: an upgrade must not swap in
 		// a better-scoring episode of a different show (see releaseIsForSeries).
 		if !releaseIsForSeries(se, c.Parsed, ti) {

@@ -47,7 +47,11 @@ func (s *Service) searchMovie(ctx context.Context, movieID int64) (int, error) {
 	if err != nil {
 		slog.Warn("automation: movie search had indexer errors", "movieId", m.ID, "err", err)
 	}
-	cands := Decide(releases, provider.KindMovie, profile)
+	rps, err := s.releaseProfilesForMovie(ctx, m.ID)
+	if err != nil {
+		return 0, err
+	}
+	cands := Decide(releases, provider.KindMovie, profile, rps)
 	blocked, err := s.store.BlocklistedTitles(ctx, &m.ID, nil)
 	if err != nil {
 		slog.Warn("automation: blocklist lookup failed", "movieId", m.ID, "err", err)
@@ -294,8 +298,12 @@ func (s *Service) searchSeason(ctx context.Context, se *store.Series, seasonNumb
 		if err != nil {
 			slog.Warn("automation: season search had indexer errors", "seriesId", se.ID, "season", seasonNumber, "err", err)
 		}
+		rps, err := s.releaseProfilesForSeries(ctx, se.ID)
+		if err != nil {
+			return 0, err
+		}
 		var packs []Candidate
-		for _, c := range Decide(releases, provider.KindTV, profile) {
+		for _, c := range Decide(releases, provider.KindTV, profile, rps) {
 			if !releaseIsForSeries(se, c.Parsed, ti) {
 				continue
 			}
@@ -395,8 +403,12 @@ func (s *Service) searchEpisode(ctx context.Context, se *store.Series, e store.E
 	if err != nil {
 		slog.Warn("automation: episode search had indexer errors", "episodeId", e.ID, "err", err)
 	}
+	rps, err := s.releaseProfilesForSeries(ctx, se.ID)
+	if err != nil {
+		return 0, err
+	}
 	var covering []Candidate
-	for _, c := range Decide(releases, provider.KindTV, profile) {
+	for _, c := range Decide(releases, provider.KindTV, profile, rps) {
 		if !releaseIsForSeries(se, c.Parsed, ti) {
 			continue
 		}
